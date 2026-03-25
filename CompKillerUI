@@ -221,6 +221,33 @@ end);
 
 getgenv = getgenv or getfenv;
 
+-- INSTANCE GUARD
+do
+    local genv = getgenv()
+    if genv.__CK_THREADS then
+        for _, t in ipairs(genv.__CK_THREADS) do pcall(task.cancel, t) end
+        genv.__CK_THREADS = nil
+    end
+    if genv.__CK_WINDOWS then
+        for _, gui in ipairs(genv.__CK_WINDOWS) do
+            pcall(function()
+                if typeof(gui) == "Instance" and gui.Parent then gui:Destroy() end
+            end)
+        end
+        genv.__CK_WINDOWS = nil
+    end
+    if genv.__CK_NOTIFY_GUI then
+        pcall(function()
+            if typeof(genv.__CK_NOTIFY_GUI) == "Instance" and genv.__CK_NOTIFY_GUI.Parent then
+                genv.__CK_NOTIFY_GUI:Destroy()
+            end
+        end)
+        genv.__CK_NOTIFY_GUI = nil
+    end
+    genv.__CK_INSTANCE = nil
+    task.wait()
+end
+
 -- ============================================================
 -- GLOBAL INSTANCE GUARD
 -- If a previous instance of this UI is loaded, destroy it
@@ -446,6 +473,10 @@ local Compkiller = {
 	ArcylicParent = CurrentCamera,
 	ProtectGui = protect_gui or protectgui or (syn and syn.protect_gui) or function(s) return s; end,
 };
+
+getgenv().__CK_INSTANCE = Compkiller
+getgenv().__CK_WINDOWS  = Compkiller.Windows
+getgenv().__CK_THREADS  = {}
 
 -- Register this instance globally so the next load can clean it up
 do
@@ -10091,6 +10122,8 @@ function Compkiller.new(Config : Window)
 		end;
 	end);
 
+	table.insert(getgenv().__CK_THREADS, task.spawn(function() ... end))
+
 	WindowArgs:Update();
 
 	local OldDelayThread;
@@ -10498,6 +10531,8 @@ function Compkiller.newNotify()
 	if Compkiller.NOTIFY_CACHE then
 		return Compkiller.NOTIFY_CACHE;
 	end;
+
+	getgenv().__CK_NOTIFY_GUI = Notification
 
 	local Notification = Instance.new("ScreenGui")
 	local NotifyContainer = Instance.new("Frame")
