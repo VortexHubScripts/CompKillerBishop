@@ -221,108 +221,6 @@ end);
 
 getgenv = getgenv or getfenv;
 
--- INSTANCE GUARD
-do
-    local genv = getgenv()
-    if genv.__CK_THREADS then
-        for _, t in ipairs(genv.__CK_THREADS) do pcall(task.cancel, t) end
-        genv.__CK_THREADS = nil
-    end
-    if genv.__CK_WINDOWS then
-        for _, gui in ipairs(genv.__CK_WINDOWS) do
-            pcall(function()
-                if typeof(gui) == "Instance" and gui.Parent then gui:Destroy() end
-            end)
-        end
-        genv.__CK_WINDOWS = nil
-    end
-    if genv.__CK_NOTIFY_GUI then
-        pcall(function()
-            if typeof(genv.__CK_NOTIFY_GUI) == "Instance" and genv.__CK_NOTIFY_GUI.Parent then
-                genv.__CK_NOTIFY_GUI:Destroy()
-            end
-        end)
-        genv.__CK_NOTIFY_GUI = nil
-    end
-    genv.__CK_INSTANCE = nil
-    task.wait()
-end
-
--- ============================================================
--- GLOBAL INSTANCE GUARD
--- If a previous instance of this UI is loaded, destroy it
--- cleanly before allowing the new script to take over.
--- ============================================================
-do
-	local genv = getgenv()
-
-	-- Cancel all tracked threads from the old instance
-	if genv.__CK_THREADS then
-		for _, t in ipairs(genv.__CK_THREADS) do
-			pcall(task.cancel, t)
-		end
-		genv.__CK_THREADS = nil
-	end
-
-	-- Cancel the notify cache thread if any
-	if genv.__CK_NOTIFY_THREAD then
-		pcall(task.cancel, genv.__CK_NOTIFY_THREAD)
-		genv.__CK_NOTIFY_THREAD = nil
-	end
-
-	-- Destroy all tracked ScreenGuis (Windows + Notify gui)
-	if genv.__CK_WINDOWS then
-		for _, gui in ipairs(genv.__CK_WINDOWS) do
-			pcall(function()
-				if typeof(gui) == "Instance" and gui.Parent then
-					gui:Destroy()
-				end
-			end)
-		end
-		genv.__CK_WINDOWS = nil
-	end
-
-	-- Destroy the notify ScreenGui separately if tracked
-	if genv.__CK_NOTIFY_GUI then
-		pcall(function()
-			if typeof(genv.__CK_NOTIFY_GUI) == "Instance" and genv.__CK_NOTIFY_GUI.Parent then
-				genv.__CK_NOTIFY_GUI:Destroy()
-			end
-		end)
-		genv.__CK_NOTIFY_GUI = nil
-	end
-
-	-- Wipe keybind cache and notify cache so they rebuild fresh
-	if genv.__CK_INSTANCE then
-		pcall(function()
-			genv.__CK_INSTANCE.__KEYBINDS_CACHE = nil
-			genv.__CK_INSTANCE.NOTIFY_CACHE     = nil
-			genv.__CK_INSTANCE.Windows          = {}
-			genv.__CK_INSTANCE.Flags            = {}
-			genv.__CK_INSTANCE.WindowsNil        = {}
-			genv.__CK_INSTANCE.Elements          = {
-				Highlight      = {},
-				DropHighlight  = {},
-				Risky          = {},
-				BGDBColor      = {},
-				BlockColor     = {},
-				StrokeColor    = {},
-				SwitchColor    = {},
-				DropColor      = {},
-				BlockBackground = {},
-				LineColor      = {},
-				HighStrokeColor = {},
-			}
-		end)
-		genv.__CK_INSTANCE = nil
-	end
-
-	-- Small yield so destroyed instances fully clean up before
-	-- the new UI starts parenting things to CoreGui / Camera
-	task.wait()
-end
--- ============================================================
-
 -- Please ignore the ugly code. [Custom File System] --
 if game:GetService('RunService'):IsStudio() then
 	local BaseWorkspace = Instance.new('Folder',game:GetService("ReplicatedFirst"));
@@ -474,18 +372,6 @@ local Compkiller = {
 	ProtectGui = protect_gui or protectgui or (syn and syn.protect_gui) or function(s) return s; end,
 };
 
-getgenv().__CK_INSTANCE = Compkiller
-getgenv().__CK_WINDOWS  = Compkiller.Windows
-getgenv().__CK_THREADS  = {}
-
--- Register this instance globally so the next load can clean it up
-do
-	local genv = getgenv()
-	genv.__CK_INSTANCE  = Compkiller
-	genv.__CK_WINDOWS   = Compkiller.Windows  -- same table reference, kept in sync
-	genv.__CK_THREADS   = {}                   -- will be populated below via a wrapper
-end
-
 Compkiller.Colors = {
 	Highlight = Color3.fromRGB(17, 238, 253),
 	Toggle = Color3.fromRGB(14, 203, 213),
@@ -519,39 +405,6 @@ Compkiller.DragBlacklist = {};
 Compkiller.IaDrag = false;
 Compkiller.LastDrag = tick();
 Compkiller.Flags = {};
-
--- ============================================================
--- THREAD TRACKER WRAPPER
--- Wraps task.spawn so every long-lived thread gets recorded
--- in the global list and can be cancelled on next load.
--- ============================================================
-local _rawSpawn = task.spawn
-local function trackedSpawn(f, ...)
-	local t = _rawSpawn(f, ...)
-	local genv = getgenv()
-	if genv.__CK_THREADS then
-		table.insert(genv.__CK_THREADS, t)
-	end
-	return t
-end
--- Replace task.spawn locally within this module only
--- (we shadow it; the global task table is untouched)
-local task = setmetatable({}, {__index = task})
-task.spawn  = trackedSpawn
-task.delay  = function(d, f, ...)
-	local t
-	t = _rawSpawn(function(...)
-		_rawSpawn(task.wait, d)
-		task.wait(d)
-		f(...)
-	end, ...)
-	local genv = getgenv()
-	if genv.__CK_THREADS then
-		table.insert(genv.__CK_THREADS, t)
-	end
-	return t
-end
--- ============================================================
 
 Compkiller.Lucide = {
 	['lucide-mouse-2'] = "rbxassetid://10088146939",
@@ -4751,21 +4604,23 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	end;
 
 	BaseParent.MouseButton1Click:Connect(function()
-		if SpamUpdate then
-			ClearDropdown();
-			UpdateDropdown();
-		end;
+		local isCurrentlyOpen = ToggleDb:GetValue();
 
-		ToggleUI(true);
-
-		if not ToggleDb:GetValue() then
+		if isCurrentlyOpen then
 			ToggleUI(false);
-		end
+		else
+			if SpamUpdate then
+				ClearDropdown();
+				UpdateDropdown();
+			end;
+
+			ToggleUI(true);
+		end;
 	end);
 
 	UserInputService.InputBegan:Connect(function(Input)
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-			if not Compkiller:_IsMouseOverFrame(DropdownWindow) then
+			if not Compkiller:_IsMouseOverFrame(DropdownWindow) and not Compkiller:_IsMouseOverFrame(BaseParent.Parent) then
 				ToggleUI(false);
 			end;
 		end;
@@ -6484,6 +6339,27 @@ function Compkiller.new(Config : Window)
 
 	if Compkiller:_IsMobile() then
 		WindowArgs.AlwayShowTab = true;
+	end;
+
+	-- Destroy old CompKiller windows on re-execution
+	for _, oldGui in next, Compkiller.Windows do
+		if oldGui and oldGui.Parent then
+			pcall(function() oldGui:Destroy() end);
+		end;
+	end;
+	Compkiller.Windows = {};
+	Compkiller.WindowsNil = {};
+
+	-- Also destroy any orphaned CompKiller ScreenGuis in CoreGui
+	for _, child in next, CoreGui:GetChildren() do
+		if child:IsA("ScreenGui") and string.find(child.Name, "u?name=compkiller_?", 1, true) then
+			pcall(function() child:Destroy() end);
+		end;
+	end;
+
+	-- Destroy old notification GUI if it exists
+	if Compkiller.NOTIFY_CACHE then
+		Compkiller.NOTIFY_CACHE = nil;
 	end;
 
 	local CompKiller = Instance.new("ScreenGui")
@@ -10122,8 +9998,6 @@ function Compkiller.new(Config : Window)
 		end;
 	end);
 
-	table.insert(getgenv().__CK_THREADS, task.spawn(function() ... end))
-
 	WindowArgs:Update();
 
 	local OldDelayThread;
@@ -10531,8 +10405,6 @@ function Compkiller.newNotify()
 	if Compkiller.NOTIFY_CACHE then
 		return Compkiller.NOTIFY_CACHE;
 	end;
-
-	getgenv().__CK_NOTIFY_GUI = Notification
 
 	local Notification = Instance.new("ScreenGui")
 	local NotifyContainer = Instance.new("Frame")
