@@ -10008,6 +10008,94 @@ function Compkiller.new(Config : Window)
 		Config.Keybind = new;
 	end;
 
+	-- DrawSettings: populates the built-in UserSettings panel (opened via avatar click)
+	function WindowArgs:DrawSettings()
+		if not WindowArgs.UserSettings.Create then
+			return;
+		end;
+
+		local ElementAPI = WindowArgs.UserSettings:Create();
+
+		-- Section: Appearance --
+		local AppearanceSection = ElementAPI:DrawSection({
+			Name = "Appearance",
+			Position = "left",
+		});
+
+		-- Theme selector --
+		local ThemeNames = {"Default","Dark Blue","Dark Green","Purple Rose","Skeet"};
+
+		AppearanceSection:AddDropdown({
+			Name = "Theme",
+			Default = "Default",
+			Values = ThemeNames,
+			Callback = function(value)
+				Compkiller:SetTheme(value);
+			end,
+		});
+
+		-- Accent/highlight color picker --
+		AppearanceSection:AddColorPicker({
+			Name = "Accent Color",
+			Default = Compkiller.Colors.Highlight,
+			Callback = function(color)
+				Compkiller:ChangeHighlightColor(color);
+			end,
+		});
+
+		-- UI background opacity slider --
+		local BGOpacitySlider = AppearanceSection:AddSlider({
+			Name = "UI Opacity",
+			Min = 10,
+			Max = 100,
+			Default = 75,
+			Increment = 5,
+			Round = 0,
+			Type = "%",
+			Callback = function(value)
+				local transparency = 1 - (value / 100);
+				for _,v in next, Compkiller.Elements.BGDBColor do
+					if v.Element and v.Property == "BackgroundColor3" then
+						v.Element.BackgroundTransparency = transparency;
+					end;
+				end;
+			end,
+		});
+
+		-- Section: Controls --
+		local ControlSection = ElementAPI:DrawSection({
+			Name = "Controls",
+			Position = "left",
+		});
+
+		-- Menu toggle keybind --
+		ControlSection:AddKeybind({
+			Name = "Toggle Menu",
+			Default = Config.Keybind,
+			Callback = function(key)
+				WindowArgs:SetMenuKey(key);
+			end,
+		});
+
+		-- Section: Performance --
+		local PerfSection = ElementAPI:DrawSection({
+			Name = "Performance",
+			Position = "left",
+		});
+
+		-- Performance mode toggle --
+		PerfSection:AddToggle({
+			Name = "Performance Mode",
+			Default = false,
+			Callback = function(value)
+				Compkiller:OptimizeMode(value);
+				WindowArgs.PerformanceMode = value;
+			end,
+		});
+
+		return ElementAPI;
+	end;
+
 	function WindowArgs:Update(config: WindowUpdate)
 		config = config or {};
 		config.Logo = config.Logo or Config.Logo;
