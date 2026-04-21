@@ -4624,11 +4624,24 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 		end;
 	end;
 
-	BaseParent.MouseButton1Click:Connect(function()
-		local currentlyOpen = ToggleDb:GetValue();
+	-- InputBegan fires before MouseButton1Click, so track when we closed via InputBegan
+	-- so the click handler doesn't immediately reopen the dropdown.
+	local _closedByInputBegan = false;
 
-		if currentlyOpen then
-			ToggleUI(false);
+	UserInputService.InputBegan:Connect(function(Input)
+		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+			if not Compkiller:_IsMouseOverFrame(DropdownWindow) then
+				if ToggleDb:GetValue() then
+					_closedByInputBegan = Compkiller:_IsMouseOverFrame(BaseParent);
+				end;
+				ToggleUI(false);
+			end;
+		end;
+	end);
+
+	BaseParent.MouseButton1Click:Connect(function()
+		if _closedByInputBegan then
+			_closedByInputBegan = false;
 			return;
 		end;
 
@@ -4638,14 +4651,6 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 		end;
 
 		ToggleUI(true);
-	end);
-
-	UserInputService.InputBegan:Connect(function(Input)
-		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-			if not Compkiller:_IsMouseOverFrame(DropdownWindow) then
-				ToggleUI(false);
-			end;
-		end;
 	end);
 
 	local Args = {};
