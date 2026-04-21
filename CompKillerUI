@@ -208,6 +208,11 @@ export type Paragraph = {
 	Content: string
 }
 
+export type Label = {
+	Name: string,
+	Flag: string | nil,
+}
+
 pcall(function() -- for Luraph
 	local Constant = table.concat({"LP","H_NO"}).."_VI".."RTU".."AL".."IZE";
 	getfenv()[Constant] = getfenv()[Constant] or function(f) return f end; 
@@ -5605,6 +5610,104 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		end);
 
 		return Args;
+	end;
+
+	function Args:AddLabel(Config: Label)
+		Config = Compkiller.__CONFIG(Config, {
+			Name = "",
+			Flag = nil,
+		});
+
+		local Label = Instance.new("Frame")
+		local LabelText = Instance.new("TextLabel")
+		local BlockLine = Instance.new("Frame")
+
+		if Compkiller:_IsMobile() then
+			Compkiller:_AddDragBlacklist(Label);
+		end;
+
+		Label.Name = Compkiller:_RandomString()
+		Label.Parent = Parent
+		Label.BackgroundTransparency = 1.000
+		Label.BorderColor3 = Color3.fromRGB(0, 0, 0)
+		Label.BorderSizePixel = 0
+		Label.Size = UDim2.new(1, -1, 0, 30)
+		Label.ZIndex = Zindex + 2
+		Label.ClipsDescendants = true
+
+		LabelText.Name = Compkiller:_RandomString()
+		LabelText.Parent = Label
+		LabelText.AnchorPoint = Vector2.new(0, 0.5)
+		LabelText.BackgroundTransparency = 1.000
+		LabelText.BorderColor3 = Color3.fromRGB(0, 0, 0)
+		LabelText.BorderSizePixel = 0
+		LabelText.Position = UDim2.new(0, 12, 0.5, 0)
+		LabelText.Size = UDim2.new(1, -20, 0, 25)
+		LabelText.ZIndex = Zindex + 3
+		LabelText.Font = Enum.Font.GothamMedium
+		LabelText.Text = Config.Name
+		LabelText.TextColor3 = Compkiller.Colors.SwitchColor
+		LabelText.TextSize = 13.000
+		LabelText.TextTransparency = 0.400
+		LabelText.TextXAlignment = Enum.TextXAlignment.Left
+		LabelText.RichText = true
+
+		table.insert(Compkiller.Elements.SwitchColor, {
+			Element = LabelText,
+			Property = "TextColor3"
+		});
+
+		BlockLine.Name = Compkiller:_RandomString()
+		BlockLine.Parent = Label
+		BlockLine.AnchorPoint = Vector2.new(0.5, 1)
+		BlockLine.BackgroundColor3 = Compkiller.Colors.LineColor
+		BlockLine.BackgroundTransparency = 0.500
+		BlockLine.BorderColor3 = Color3.fromRGB(0, 0, 0)
+		BlockLine.BorderSizePixel = 0
+		BlockLine.Position = UDim2.new(0.5, 0, 1, 0)
+		BlockLine.Size = UDim2.new(1, -26, 0, 1)
+		BlockLine.ZIndex = Zindex + 4
+
+		table.insert(Compkiller.Elements.LineColor, {
+			Element = BlockLine,
+			Property = "BackgroundColor3"
+		});
+
+		local LabelArgs = {};
+
+		LabelArgs.Flag = Config.Flag;
+
+		function LabelArgs:SetText(str)
+			LabelText.Text = str or "";
+		end;
+
+		function LabelArgs:GetText()
+			return LabelText.Text;
+		end;
+
+		LabelArgs.Signal = Signal:Connect(function(bool)
+			if bool then
+				Compkiller:_Animation(LabelText, TweenInfo.new(0.2), {
+					TextTransparency = 0.400
+				});
+				Compkiller:_Animation(BlockLine, TweenInfo.new(0.2), {
+					BackgroundTransparency = 0.500
+				});
+			else
+				Compkiller:_Animation(LabelText, TweenInfo.new(0.2), {
+					TextTransparency = 1
+				});
+				Compkiller:_Animation(BlockLine, TweenInfo.new(0.2), {
+					BackgroundTransparency = 1
+				});
+			end;
+		end);
+
+		if Config.Flag then
+			Compkiller.Flags[Config.Flag] = LabelArgs;
+		end;
+
+		return LabelArgs;
 	end;
 
 	function Args:AddTextBox(Config: TextBoxConfig)
