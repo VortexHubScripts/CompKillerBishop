@@ -10022,26 +10022,79 @@ function Compkiller.new(Config : Window)
 			Position = "left",
 		});
 
-		-- Theme selector --
-		local ThemeNames = {"Default","Dark Blue","Dark Green","Purple Rose","Skeet"};
+		-- Helper: apply a color to a Compkiller.Colors key and refresh all registered elements
+		local function ApplyColor(key, color)
+			Compkiller.Colors[key] = color;
+			if Compkiller.Elements[key] then
+				for _, v in next, Compkiller.Elements[key] do
+					if v.Element and v.Property then
+						v.Element[v.Property] = color;
+					end;
+				end;
+			end;
+		end;
 
-		AppearanceSection:AddDropdown({
+		-- Theme selector --
+		local ThemeNames = {"Default","Dark Blue","Dark Green","Purple Rose","Skeet","Custom"};
+
+		local ThemeDropdown = AppearanceSection:AddDropdown({
 			Name = "Theme",
 			Default = "Default",
 			Values = ThemeNames,
 			Callback = function(value)
-				Compkiller:SetTheme(value);
+				if value ~= "Custom" then
+					Compkiller:SetTheme(value);
+					-- Sync all color pickers to the newly loaded theme colors
+					if WindowArgs._SettingsColorPickers then
+						for colorKey, picker in next, WindowArgs._SettingsColorPickers do
+							picker:SetValue(Compkiller.Colors[colorKey]);
+						end;
+					end;
+				end;
 			end,
 		});
 
-		-- Accent/highlight color picker --
-		AppearanceSection:AddColorPicker({
-			Name = "Accent Color",
-			Default = Compkiller.Colors.Highlight,
-			Callback = function(color)
-				Compkiller:ChangeHighlightColor(color);
-			end,
+		-- Color customization section --
+		local ColorSection = ElementAPI:DrawSection({
+			Name = "Custom Colors",
+			Position = "left",
 		});
+
+		-- Table of { display name, Colors key } pairs
+		local ColorDefs = {
+			{ "Accent",         "Highlight"       },
+			{ "Background",     "BGDBColor"       },
+			{ "Block BG",       "BlockBackground" },
+			{ "Block",          "BlockColor"      },
+			{ "Dropdown",       "DropColor"       },
+			{ "Border",         "StrokeColor"     },
+			{ "Highlight Border","HighStrokeColor" },
+			{ "Separator",      "LineColor"       },
+			{ "Text",           "SwitchColor"     },
+		};
+
+		WindowArgs._SettingsColorPickers = {};
+
+		for _, def in ipairs(ColorDefs) do
+			local label, key = def[1], def[2];
+
+			local picker = ColorSection:AddColorPicker({
+				Name = label,
+				Default = Compkiller.Colors[key],
+				Callback = function(color)
+					if key == "Highlight" then
+						-- ChangeHighlightColor also updates Toggle color
+						Compkiller:ChangeHighlightColor(color);
+					else
+						ApplyColor(key, color);
+					end;
+					-- Switch theme label to Custom
+					ThemeDropdown:SetValue("Custom");
+				end,
+			});
+
+			WindowArgs._SettingsColorPickers[key] = picker;
+		end;
 
 		-- UI background opacity slider --
 		local BGOpacitySlider = AppearanceSection:AddSlider({
