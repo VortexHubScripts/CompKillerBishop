@@ -4434,6 +4434,26 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 
 	ToggleUI(false)
 
+	-- Fix: keep the dropdown pinned to BaseParent while the tab scrolls
+	do
+		local MUL = Window.AbsoluteSize.Y / 2;
+
+		local function GetDropdownPosition()
+			local posY = BaseParent.AbsolutePosition.Y;
+			if posY > MUL then
+				return UDim2.fromOffset(BaseParent.AbsolutePosition.X + 1, posY + 55);
+			else
+				return UDim2.fromOffset(BaseParent.AbsolutePosition.X + 1, posY + 80);
+			end;
+		end;
+
+		BaseParent:GetPropertyChangedSignal("AbsolutePosition"):Connect(function()
+			if ToggleDb:GetValue() then
+				DropdownWindow.Position = GetDropdownPosition();
+			end;
+		end);
+	end;
+
 	local SpamUpdate,_Delay = false , tick();
 	local __signals = {};
 	local Default = nil;
@@ -4605,16 +4625,19 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	end;
 
 	BaseParent.MouseButton1Click:Connect(function()
+		local currentlyOpen = ToggleDb:GetValue();
+
+		if currentlyOpen then
+			ToggleUI(false);
+			return;
+		end;
+
 		if SpamUpdate then
 			ClearDropdown();
 			UpdateDropdown();
 		end;
 
 		ToggleUI(true);
-
-		if not ToggleDb:GetValue() then
-			ToggleUI(false);
-		end
 	end);
 
 	UserInputService.InputBegan:Connect(function(Input)
