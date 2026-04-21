@@ -169,6 +169,7 @@ export type Slider = {
 	Default: number,
 	Type: string,
 	Round: number,
+	Increment: number,
 	Callback: (Value: number) -> any?
 };
 
@@ -4604,23 +4605,21 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	end;
 
 	BaseParent.MouseButton1Click:Connect(function()
-		local isCurrentlyOpen = ToggleDb:GetValue();
-
-		if isCurrentlyOpen then
-			ToggleUI(false);
-		else
-			if SpamUpdate then
-				ClearDropdown();
-				UpdateDropdown();
-			end;
-
-			ToggleUI(true);
+		if SpamUpdate then
+			ClearDropdown();
+			UpdateDropdown();
 		end;
+
+		ToggleUI(true);
+
+		if not ToggleDb:GetValue() then
+			ToggleUI(false);
+		end
 	end);
 
 	UserInputService.InputBegan:Connect(function(Input)
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-			if not Compkiller:_IsMouseOverFrame(DropdownWindow) and not Compkiller:_IsMouseOverFrame(BaseParent.Parent) then
+			if not Compkiller:_IsMouseOverFrame(DropdownWindow) then
 				ToggleUI(false);
 			end;
 		end;
@@ -5090,6 +5089,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			Max = 100,
 			Type = "",
 			Round = 0,
+			Increment = nil,
 			Callback = function() end
 		});
 
@@ -5260,6 +5260,12 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			local SizeScale = math.clamp((((Input.Position.X) - SliderBar.AbsolutePosition.X) / SliderBar.AbsoluteSize.X), 0, 1);
 
 			local Main = ((Config.Max - Config.Min) * SizeScale) + Config.Min;
+
+			-- Snap to increment if provided
+			if Config.Increment and Config.Increment > 0 then
+				Main = math.round(Main / Config.Increment) * Config.Increment;
+				Main = math.clamp(Main, Config.Min, Config.Max);
+			end;
 
 			local Value = Compkiller:_Rounding(Main,Config.Round);
 
@@ -6339,27 +6345,6 @@ function Compkiller.new(Config : Window)
 
 	if Compkiller:_IsMobile() then
 		WindowArgs.AlwayShowTab = true;
-	end;
-
-	-- Destroy old CompKiller windows on re-execution
-	for _, oldGui in next, Compkiller.Windows do
-		if oldGui and oldGui.Parent then
-			pcall(function() oldGui:Destroy() end);
-		end;
-	end;
-	Compkiller.Windows = {};
-	Compkiller.WindowsNil = {};
-
-	-- Also destroy any orphaned CompKiller ScreenGuis in CoreGui
-	for _, child in next, CoreGui:GetChildren() do
-		if child:IsA("ScreenGui") and string.find(child.Name, "u?name=compkiller_?", 1, true) then
-			pcall(function() child:Destroy() end);
-		end;
-	end;
-
-	-- Destroy old notification GUI if it exists
-	if Compkiller.NOTIFY_CACHE then
-		Compkiller.NOTIFY_CACHE = nil;
 	end;
 
 	local CompKiller = Instance.new("ScreenGui")
