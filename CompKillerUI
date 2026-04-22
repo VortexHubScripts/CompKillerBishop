@@ -8724,23 +8724,59 @@ function Compkiller.new(Config : Window)
 				AuthorText.Position = UDim2.new(0, AuthorText:GetAttribute('SPC'), 0.5, 15)
 			end;
 
+			-- Auto-load badge (shown top-right of config row)
+			local AutoTag = Instance.new("TextLabel")
+			AutoTag.Parent = ConfigBlock
+			AutoTag.AnchorPoint = Vector2.new(1, 0)
+			AutoTag.BackgroundTransparency = 1
+			AutoTag.BorderSizePixel = 0
+			AutoTag.Position = UDim2.new(1, -10, 0, 4)
+			AutoTag.Size = UDim2.new(0, 60, 0, 14)
+			AutoTag.ZIndex = ConfigBlock.ZIndex + 2
+			AutoTag.Font = Enum.Font.GothamBold
+			AutoTag.Text = "AUTO"
+			AutoTag.TextColor3 = Compkiller.Colors.Highlight
+			AutoTag.TextSize = 9
+			AutoTag.TextTransparency = 1
+			AutoTag.TextXAlignment = Enum.TextXAlignment.Right
+			table.insert(Compkiller.Elements.Highlight, { Element = AutoTag, Property = "TextColor3" });
+
+			-- Wrap SetInfo to also handle auto-load badge visibility
+			local _origSetInfo = ConfigButton.SetInfo;
+			function ConfigButton:SetInfo(Author, ConfigName, isAutoLoad)
+				_origSetInfo(self, Author, ConfigName);
+				AutoTag.TextTransparency = (isAutoLoad and 0.1) or 1;
+			end;
+
 			ConfigButton:Update();
 
-			Compkiller:_Input(LoadButton,function()
+			Compkiller:_Input(LoadButton, function()
 				task.spawn(ConfigButton.OnLoad);
 			end);
 
-			Compkiller:_Input(SaveButton,function()
+			Compkiller:_Input(SaveButton, function()
 				task.spawn(ConfigButton.OnSave);
 			end);
 
 			DelButton.MouseButton1Click:Connect(function()
 				task.spawn(ConfigButton.OnDelete);
-			end)
+			end);
+
+			-- Click config name = toggle auto-load
+			Compkiller:_Input(ConfigText, function()
+				if ConfigButton.OnAutoLoad then task.spawn(ConfigButton.OnAutoLoad); end;
+			end);
+
+			-- Click author text = copy config to clipboard (share)
+			Compkiller:_Input(AuthorText, function()
+				if ConfigButton.OnShare then task.spawn(ConfigButton.OnShare); end;
+			end);
 
 			ConfigButton.OnLoad = nil;
 			ConfigButton.OnSave = nil;
 			ConfigButton.OnDelete = nil;
+			ConfigButton.OnAutoLoad = nil;
+			ConfigButton.OnShare = nil;
 
 			return ConfigButton;
 		end;
@@ -8748,102 +8784,136 @@ function Compkiller.new(Config : Window)
 		function TabArgs:Init()
 			local __signals = {};
 			local Init = {};
+			local _autoLoadName = nil;
+			local AutoLoadPath = Compkiller:_Path(Configuration.Config.Directory, "__autoload");
+
+			if isfile(AutoLoadPath) then
+				_autoLoadName = readfile(AutoLoadPath);
+			end;
+
+			local Refresh;
 
 			Compkiller:_Input(Button,function()
 				if TextBox.Text:byte() then
-					WindowArgs.Notify.new({
-						Title = "Configs",
-						Icon = Compkiller:_GetIcon(Config.Logo),
-						Content = "Create config \""..TextBox.Text.."\""
-					})
-
-					Configuration.Config:WriteConfig({
-						Name = TextBox.Text,
-						Author = WindowArgs.Username,
-					});
+					local name = TextBox.Text;
+					TextBox.Text = "";
+					Configuration.Config:WriteConfig({ Name = name, Author = WindowArgs.Username });
+					WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Created \"" .. name .. "\"", Duration = 2 });
+					Refresh();
 				end;
 			end);
 
-			local Refresh = function()
+			-- Import from clipboard
+			Compkiller:_Input(SectionClose, function()
+				local ok, raw = pcall(getclipboard);
+				if ok and raw and raw:byte() then
+					local ok2, decoded = pcall(HttpService.JSONDecode, HttpService, raw);
+					if ok2 and decoded and decoded.__INFORMATION then
+						local importName = decoded.__INFORMATION.Name or "Imported";
+						Configuration.Config:LoadConfigFromString(raw);
+						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Imported \"" .. importName .. "\" from clipboard", Duration = 3 });
+					else
+						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Clipboard is not a valid config", Duration = 2 });
+					end;
+				end;
+			end);
+
+			Refresh = function()
 				local FullConfig = Configuration.Config:GetFullConfigs();
 
 				for i,v in next, ScrollingFrame:GetChildren() do
-					if v:IsA('Frame') and v.Name ~= "Space" then
-						v:Destroy();
-					end;
+					if v:IsA("Frame") and v.Name ~= "Space" then v:Destroy(); end;
 				end;
 
-				for i,v in next , __signals do
-					v:Disconnect();
-				end;
+				for i,v in next, __signals do v:Disconnect(); end;
+				__signals = {};
 
-				for i,v in next , FullConfig do
-					local Button = TabArgs:_DrawConfig();
+				for i, v in next, FullConfig do
+					local cfgInfo = v.Info or {};
+					local cfgName = v.Name;
 
-					Button:SetInfo(v.Info.Author,v.Name);
+					local Btn = TabArgs:_DrawConfig();
+					Btn:SetInfo(cfgInfo.Author or "Unknown", cfgName, _autoLoadName == cfgName);
 
-					table.insert(__signals,TabOpenSignal:Connect(function(v)
-						Button:Toggle(v);
+					table.insert(__signals, TabOpenSignal:Connect(function(open)
+						Btn:Toggle(open);
 					end));
 
-					Button.OnLoad = function()
-						WindowArgs.Notify.new({
-							Title = "Configs",
-							Icon = Compkiller:CacheImage(Config.Logo),
-							Content = "Load config \""..v.Name.."\""
-						})
-
-						Configuration.Config:LoadConfig(v.Name);
+					Btn.OnLoad = function()
+						Configuration.Config:LoadConfig(cfgName);
+						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Loaded \"" .. cfgName .. "\"", Duration = 2 });
 					end;
 
-					Button.OnSave = function()
-						WindowArgs.Notify.new({
-							Title = "Configs",
-							Icon = Compkiller:CacheImage(Config.Logo),
-							Content = "Save config \""..v.Name.."\""
-						})
+					Btn.OnSave = function()
+						Configuration.Config:WriteConfig({ Name = cfgName, Author = cfgInfo.Author or WindowArgs.Username });
+						Btn:SetInfo(cfgInfo.Author or WindowArgs.Username, cfgName, _autoLoadName == cfgName);
+						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Saved \"" .. cfgName .. "\"", Duration = 2 });
+					end;
 
-						Button:SetInfo(v.Info.Author,v.Name);
+					Btn.OnDelete = function()
+						Configuration.Config:DeleteConfig(cfgName);
+						if _autoLoadName == cfgName then
+							_autoLoadName = nil;
+							pcall(delfile, AutoLoadPath);
+						end;
+						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Deleted \"" .. cfgName .. "\"", Duration = 2 });
+						Refresh();
+					end;
 
-						Configuration.Config:WriteConfig({
-							Name = v.Name,
-							Author = v.Info.Author;
-						});
-					end
+					Btn.OnAutoLoad = function()
+						if _autoLoadName == cfgName then
+							_autoLoadName = nil;
+							pcall(delfile, AutoLoadPath);
+							WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Auto-load disabled", Duration = 2 });
+						else
+							_autoLoadName = cfgName;
+							pcall(writefile, AutoLoadPath, cfgName);
+							WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "\"" .. cfgName .. "\" will auto-load on start", Duration = 2 });
+						end;
+						Refresh();
+					end;
 
-					Button.OnDelete = function()
-						WindowArgs.Notify.new({
-							Title = "Configs",
-							Icon = Compkiller:CacheImage(Config.Logo),
-							Content = "Delete config \""..v.Name.."\""
-						})
-
-						Configuration.Config:DeleteConfig(v.Name)
-					end
+					Btn.OnShare = function()
+						local _path = Compkiller:_Path(Configuration.Config.Directory, cfgName);
+						if isfile(_path) then
+							pcall(setclipboard, readfile(_path));
+							WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "\"" .. cfgName .. "\" copied to clipboard", Duration = 2 });
+						end;
+					end;
 				end;
+
+				ScrollingFrame.CanvasSize = UDim2.fromOffset(0, UIListLayout.AbsoluteContentSize.Y + 5);
 			end;
 
 			Refresh();
 
+			-- Auto-load on startup
+			if _autoLoadName then
+				task.delay(0.5, function()
+					if isfile(Compkiller:_Path(Configuration.Config.Directory, _autoLoadName)) then
+						Configuration.Config:LoadConfig(_autoLoadName);
+						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Auto-loaded \"" .. _autoLoadName .. "\"", Duration = 3 });
+					end;
+				end);
+			end;
+
 			Init.THREAD = task.spawn(function()
 				local OldIndex = Configuration.Config:GetConfigCount();
-
-				while true do task.wait(0.125);
+				while true do task.wait(0.5);
 					local CountInDirectory = Configuration.Config:GetConfigCount();
-
 					if OldIndex ~= CountInDirectory then
 						OldIndex = CountInDirectory;
-
 						Refresh();
 					end;
 				end;
 			end);
 
+			Init.Refresh = Refresh;
+
 			return Init;
 		end;
 
 		return TabArgs;
-	end;
 
 	function WindowArgs:DrawTab(TabConfig : TabConfig , Internal)
 		TabConfig = Compkiller.__CONFIG(TabConfig,{
