@@ -8353,7 +8353,7 @@ function Compkiller.new(Config : Window)
 			ConfigBlock.BorderColor3 = Color3.fromRGB(0, 0, 0)
 			ConfigBlock.BorderSizePixel = 0
 			ConfigBlock.BackgroundTransparency = 1
-			ConfigBlock.Size = UDim2.new(1, -1, 0, 60)
+			ConfigBlock.Size = UDim2.new(1, -1, 0, 66)
 			ConfigBlock.ZIndex = 10
 
 			if Compkiller:_IsMobile() then
@@ -8377,8 +8377,8 @@ function Compkiller.new(Config : Window)
 			ConfigText.AnchorPoint = Vector2.new(0, 0)
 			ConfigText.BackgroundTransparency = 1
 			ConfigText.BorderSizePixel = 0
-			ConfigText.Position = UDim2.new(0, 12, 0, 22)
-			ConfigText.Size = UDim2.new(0.55, 0, 0, 18)
+			ConfigText.Position = UDim2.new(0, 12, 0, 5)
+			ConfigText.Size = UDim2.new(0.55, 0, 0, 16)
 			ConfigText.ZIndex = 11
 			ConfigText.Font = Enum.Font.GothamMedium
 			ConfigText.RichText = true
@@ -8404,8 +8404,8 @@ function Compkiller.new(Config : Window)
 			RenameBox.BackgroundColor3 = Compkiller.Colors.BlockColor
 			RenameBox.BackgroundTransparency = 0.3
 			RenameBox.BorderSizePixel = 0
-			RenameBox.Position = UDim2.new(0, 10, 0, 20)
-			RenameBox.Size = UDim2.new(0.55, 0, 0, 22)
+			RenameBox.Position = UDim2.new(0, 10, 0, 3)
+			RenameBox.Size = UDim2.new(0.55, 0, 0, 20)
 			RenameBox.ZIndex = 15
 			RenameBox.Visible = false
 			RenameBox.ClearTextOnFocus = false
@@ -8492,7 +8492,7 @@ function Compkiller.new(Config : Window)
 			TopButtons.AnchorPoint = Vector2.new(1, 0)
 			TopButtons.BackgroundTransparency = 1
 			TopButtons.BorderSizePixel = 0
-			TopButtons.Position = UDim2.new(1, -10, 0, 19)
+			TopButtons.Position = UDim2.new(1, -10, 0, 24)
 			TopButtons.Size = UDim2.new(0, 180, 0, 20)
 			TopButtons.ZIndex = 12
 
