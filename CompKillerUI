@@ -8914,6 +8914,7 @@ function Compkiller.new(Config : Window)
 		end;
 
 		return TabArgs;
+	end;  -- closes WindowArgs:DrawConfig
 
 	function WindowArgs:DrawTab(TabConfig : TabConfig , Internal)
 		TabConfig = Compkiller.__CONFIG(TabConfig,{
