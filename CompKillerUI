@@ -3280,8 +3280,8 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 
 	Keybinds.Name = Compkiller:_RandomString()
 	Keybinds.Parent = Window
-	Keybinds.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
-	Keybinds.BackgroundTransparency = 0.25
+	Keybinds.BackgroundColor3 = Color3.fromRGB(8, 8, 8)
+	Keybinds.BackgroundTransparency = 0.45
 	Keybinds.BorderColor3 = Color3.fromRGB(0, 0, 0)
 	Keybinds.BorderSizePixel = 0
 	Keybinds.Position = UDim2.new(0, 100, 0, 100)
@@ -3343,6 +3343,11 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 	UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	UIListLayout.Padding = UDim.new(0, 0)
 
+	local RowsPadding = Instance.new("UIPadding")
+	RowsPadding.Parent = MainFrame
+	RowsPadding.PaddingTop    = UDim.new(0, 3)
+	RowsPadding.PaddingBottom = UDim.new(0, 3)
+
 	-- ── Drag handle ───────────────────────────────────────────────────────────
 	MovingFrame.Name = Compkiller:_RandomString()
 	MovingFrame.Parent = Keybinds
@@ -3363,12 +3368,12 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 			local hasRows  = contentH > 1
 
 			Compkiller:_Animation(MainFrame, TweenInfo.new(0.3), {
-				Size = UDim2.new(1, 0, 0, hasRows and contentH or 0)
+				Size = UDim2.new(1, 0, 0, hasRows and (contentH + 6) or 0)
 			})
 
 			Compkiller:_Animation(Keybinds, TweenInfo.new(0.3), {
-				BackgroundTransparency = hasRows and 0.25 or 1,
-				Size = UDim2.new(0, PANEL_W, 0, hasRows and (22 + contentH) or 22)
+				BackgroundTransparency = hasRows and 0.45 or 1,
+				Size = UDim2.new(0, PANEL_W, 0, hasRows and (22 + contentH + 6) or 22)
 			})
 
 			Compkiller:_Animation(TitleLabel, TweenInfo.new(0.2), {
@@ -3399,58 +3404,57 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 
 	-- ── AddFrame: one row  →  FeatureName ········· [KEY] ────────────────────
 	function Ref:AddFrame()
-		local ROW_H  = 18
-		local KEY_W  = 36  -- bracket key label on the right
+		local ROW_H = 17
+		local KEY_W = 52  -- wide enough for e.g. [RightShift]
 
 		local Keyholder = Instance.new("Frame")
-		local RowAccent = Instance.new("Frame")   -- left stripe (hidden by default)
-		local Label     = Instance.new("TextLabel") -- feature name
-		local TypeLabel = Instance.new("TextLabel") -- [KEY]
+		local RowAccent = Instance.new("Frame")
+		local Label     = Instance.new("TextLabel")
+		local TypeLabel = Instance.new("TextLabel")
 
-		-- Row
+		-- Row — fully transparent bg, the outer Keybinds panel provides the dark bg
 		Keyholder.Name = Compkiller:_RandomString()
-		Keyholder.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 		Keyholder.BackgroundTransparency = 1
 		Keyholder.BorderSizePixel = 0
 		Keyholder.Size = UDim2.new(1, 0, 0, ROW_H)
 		Keyholder.ZIndex = MainFrame.ZIndex + 3
 		Keyholder.ClipsDescendants = false
 
-		-- subtle left accent per row
+		-- 2px highlight stripe on left edge of each row
 		RowAccent.Name = Compkiller:_RandomString()
 		RowAccent.Parent = Keyholder
 		RowAccent.BackgroundColor3 = Compkiller.Colors.Highlight
-		RowAccent.BackgroundTransparency = 0.5
+		RowAccent.BackgroundTransparency = 1
 		RowAccent.BorderSizePixel = 0
-		RowAccent.Position = UDim2.new(0, 0, 0, 0)
-		RowAccent.Size = UDim2.new(0, 2, 1, 0)
+		RowAccent.Position = UDim2.new(0, 0, 0.15, 0)
+		RowAccent.Size = UDim2.new(0, 2, 0.7, 0)
 		RowAccent.ZIndex = MainFrame.ZIndex + 4
 
 		table.insert(Compkiller.Elements.Highlight, { Element = RowAccent, Property = 'BackgroundColor3' })
 
-		-- Feature name (left side)
+		-- Feature name (left, white-ish)
 		Label.Name = Compkiller:_RandomString()
 		Label.Parent = Keyholder
 		Label.AnchorPoint = Vector2.new(0, 0.5)
 		Label.BackgroundTransparency = 1
 		Label.BorderSizePixel = 0
-		Label.Position = UDim2.new(0, 7, 0.5, 0)
-		Label.Size = UDim2.new(1, -(KEY_W + 10), 1, 0)
+		Label.Position = UDim2.new(0, 8, 0.5, 0)
+		Label.Size = UDim2.new(1, -(KEY_W + 14), 1, 0)
 		Label.ZIndex = MainFrame.ZIndex + 5
 		Label.Font = Enum.Font.Code
-		Label.TextColor3 = Color3.fromRGB(220, 220, 220)
+		Label.TextColor3 = Color3.fromRGB(230, 230, 230)
 		Label.TextSize = 11
 		Label.TextTransparency = 1
 		Label.TextXAlignment = Enum.TextXAlignment.Left
 		Label.TextTruncate = Enum.TextTruncate.AtEnd
 
-		-- [KEY] label (right side)
+		-- [KEY] on right, highlight colored
 		TypeLabel.Name = Compkiller:_RandomString()
 		TypeLabel.Parent = Keyholder
 		TypeLabel.AnchorPoint = Vector2.new(1, 0.5)
 		TypeLabel.BackgroundTransparency = 1
 		TypeLabel.BorderSizePixel = 0
-		TypeLabel.Position = UDim2.new(1, -4, 0.5, 0)
+		TypeLabel.Position = UDim2.new(1, -6, 0.5, 0)
 		TypeLabel.Size = UDim2.new(0, KEY_W, 1, 0)
 		TypeLabel.ZIndex = MainFrame.ZIndex + 5
 		TypeLabel.Font = Enum.Font.Code
@@ -3473,12 +3477,8 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 			UpdateScale()
 		end
 
-		-- SetType receives the Mode string (Hold/Toggle/On/Off) but we want the
-		-- actual bound key. The key is stored in APIRef.Keybind and passed via
-		-- APIRef.Update → SetType.  We wrap the text in brackets here.
 		function frame_ref:SetType(str: string)
-			local s = str or TypeLabel.Text
-			-- strip stale brackets then rewrap
+			local s = str or ""
 			s = s:gsub("^%[(.-)%]$", "%1")
 			TypeLabel.Text = "[" .. s .. "]"
 			UpdateScale()
@@ -3486,29 +3486,19 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 
 		function frame_ref:SetVisible(v)
 			if v then
-				Compkiller:_Animation(Keyholder, TweenInfo.new(0.1), {
-					BackgroundTransparency = 0.72,
-					Size = UDim2.new(1, 0, 0, ROW_H)
-				})
-				Compkiller:_Animation(Label,      TweenInfo.new(0.15), { TextTransparency = 0 })
-				Compkiller:_Animation(TypeLabel,  TweenInfo.new(0.15), { TextTransparency = 0 })
-				Compkiller:_Animation(RowAccent,  TweenInfo.new(0.15), { BackgroundTransparency = 0.5 })
+				-- no bg tween on the row itself — panel bg handles darkening
+				Keyholder.Size = UDim2.new(1, 0, 0, ROW_H)
+				Compkiller:_Animation(Label,     TweenInfo.new(0.15), { TextTransparency = 0 })
+				Compkiller:_Animation(TypeLabel, TweenInfo.new(0.15), { TextTransparency = 0 })
+				Compkiller:_Animation(RowAccent, TweenInfo.new(0.15), { BackgroundTransparency = 0.3 })
 			else
-				Compkiller:_Animation(Keyholder, TweenInfo.new(0.1), {
-					BackgroundTransparency = 1,
-					Size = UDim2.new(1, 0, 0, 0)
-				})
-				Compkiller:_Animation(Label,      TweenInfo.new(0.15), { TextTransparency = 1 })
-				Compkiller:_Animation(TypeLabel,  TweenInfo.new(0.15), { TextTransparency = 1 })
-				Compkiller:_Animation(RowAccent,  TweenInfo.new(0.15), { BackgroundTransparency = 1 })
+				Keyholder.Size = UDim2.new(1, 0, 0, 0)
+				Compkiller:_Animation(Label,     TweenInfo.new(0.15), { TextTransparency = 1 })
+				Compkiller:_Animation(TypeLabel, TweenInfo.new(0.15), { TextTransparency = 1 })
+				Compkiller:_Animation(RowAccent, TweenInfo.new(0.15), { BackgroundTransparency = 1 })
 			end
 
-			if Keyholder.BackgroundTransparency <= 0.95 then
-				Keyholder.Parent = MainFrame
-			else
-				Keyholder.Parent = nil
-			end
-
+			Keyholder.Parent = v and MainFrame or nil
 			UpdateScale()
 		end
 
