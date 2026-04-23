@@ -3680,7 +3680,9 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 		-- Click handler on the toggle area
 		ToggleBtn.InputBegan:Connect(function(Input)
 			if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-				frame_ref._onToggle and frame_ref._onToggle(not _toggleState);
+				if frame_ref._onToggle then
+					frame_ref._onToggle(not _toggleState);
+				end;
 			end;
 		end);
 
