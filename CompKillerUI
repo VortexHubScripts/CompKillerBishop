@@ -8761,12 +8761,15 @@ function Compkiller.new(Config : Window)
 				ConfigText.TextTransparency = 1;
 				_renameEscaped = false;
 
-				-- Focus + select all text so typing replaces immediately
+				-- Focus and put the cursor at the end. We intentionally do NOT select
+				-- all text here because that would render the text in the OS selection
+				-- highlight color (blue), which looks wrong. User can Ctrl+A if they
+				-- want to replace the whole name at once.
 				RenameBox:CaptureFocus();
 				task.defer(function()
 					pcall(function()
 						RenameBox.CursorPosition = #RenameBox.Text + 1;
-						RenameBox.SelectionStart = 1;
+						RenameBox.SelectionStart = -1;
 					end);
 				end);
 			end;
