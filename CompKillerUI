@@ -7757,7 +7757,7 @@ function Compkiller.new(Config : Window)
 		local UIStroke_2 = Instance.new("UIStroke")
 		local Header_2 = Instance.new("Frame")
 		local SectionText_2 = Instance.new("TextLabel")
-		local SectionClose_2 = Instance.new("ImageLabel")
+		local SectionClose_2 = Instance.new("ImageButton")
 		local Frame = Instance.new("Frame")
 		local UIStroke_3 = Instance.new("UIStroke")
 		local UICorner_3 = Instance.new("UICorner")
@@ -7844,7 +7844,7 @@ function Compkiller.new(Config : Window)
 		SectionClose.Position = UDim2.new(1, -12, 0.5, 0)
 		SectionClose.Size = UDim2.new(0, 17, 0, 17)
 		SectionClose.ZIndex = 10
-		SectionClose.Image = Compkiller:CacheImage("rbxassetid://109535175596957")
+		SectionClose.Image = Compkiller:CacheImage("rbxassetid://10723344270") -- download/import icon
 		SectionClose.ImageTransparency = 0.500
 
 
@@ -8352,6 +8352,7 @@ function Compkiller.new(Config : Window)
 			local UICorner_3 = Instance.new("UICorner")
 			local AuthorText = Instance.new("TextLabel")
 			local DelButton = Instance.new("ImageButton")
+			local ShareButton = Instance.new("ImageButton")
 			local UICorner = Instance.new("UICorner")
 			local UIGradient = Instance.new("UIGradient")
 
@@ -8370,6 +8371,22 @@ function Compkiller.new(Config : Window)
 
 			UICorner.CornerRadius = UDim.new(1, 0)
 			UICorner.Parent = DelButton
+
+			-- Share button: copy config JSON to clipboard
+			ShareButton.Name = Compkiller:_RandomString()
+			ShareButton.Parent = LinkValues
+			ShareButton.BackgroundTransparency = 1.000
+			ShareButton.BorderColor3 = Color3.fromRGB(0, 0, 0)
+			ShareButton.BorderSizePixel = 0
+			ShareButton.LayoutOrder = -9998
+			ShareButton.Size = UDim2.new(0, 35, 0, 15)
+			ShareButton.ZIndex = 14
+			ShareButton.Image = Compkiller:CacheImage("rbxassetid://10734950899") -- share/upload icon
+			ShareButton.ImageColor3 = Compkiller.Colors.Highlight
+			ShareButton.ImageTransparency = 0.500
+			ShareButton.ScaleType = Enum.ScaleType.Fit
+
+			table.insert(Compkiller.Elements.Highlight, { Element = ShareButton, Property = "ImageColor3" });
 			ConfigBlock.Name = Compkiller:_RandomString()
 			ConfigBlock.Parent = ScrollingFrame
 			ConfigBlock.BackgroundColor3 = Color3.fromRGB(33, 34, 40)
@@ -8644,6 +8661,10 @@ function Compkiller.new(Config : Window)
 						ImageTransparency = 0
 					});
 
+					Compkiller:_Animation(ShareButton,Tween,{
+						ImageTransparency = 0.2
+					});
+
 					Compkiller:_Animation(Frame_2,Tween,{
 						BackgroundTransparency = 0.100
 					});
@@ -8672,6 +8693,10 @@ function Compkiller.new(Config : Window)
 					});
 
 					Compkiller:_Animation(Icon,Tween,{
+						ImageTransparency = 1
+					});
+
+					Compkiller:_Animation(ShareButton,Tween,{
 						ImageTransparency = 1
 					});
 
@@ -8742,10 +8767,15 @@ function Compkiller.new(Config : Window)
 			table.insert(Compkiller.Elements.Highlight, { Element = AutoTag, Property = "TextColor3" });
 
 			-- Wrap SetInfo to also handle auto-load badge visibility
-			local _origSetInfo = ConfigButton.SetInfo;
 			function ConfigButton:SetInfo(Author, ConfigName, isAutoLoad)
-				_origSetInfo(self, Author, ConfigName);
+				local R,G,B = tostring(math.floor(Compkiller.Colors.Highlight.R * 255)) , tostring(math.floor(Compkiller.Colors.Highlight.G * 255)) , tostring(math.floor(Compkiller.Colors.Highlight.B * 255));
+				AuthorText.Text = string.format("Author: <font color=\"rgb(%s, %s, %s)\">%s</font>" ,R,G,B , tostring(Author));
+				ConfigText.Text = ConfigName;
 				AutoTag.TextTransparency = (isAutoLoad and 0.1) or 1;
+
+				if ConfigBlock.BackgroundTransparency >= 0.7 then
+					ConfigButton:Update();
+				end;
 			end;
 
 			ConfigButton:Update();
@@ -8762,14 +8792,14 @@ function Compkiller.new(Config : Window)
 				task.spawn(ConfigButton.OnDelete);
 			end);
 
+			-- Click share button = copy config JSON to clipboard
+			ShareButton.MouseButton1Click:Connect(function()
+				if ConfigButton.OnShare then task.spawn(ConfigButton.OnShare); end;
+			end);
+
 			-- Click config name = toggle auto-load
 			Compkiller:_Input(ConfigText, function()
 				if ConfigButton.OnAutoLoad then task.spawn(ConfigButton.OnAutoLoad); end;
-			end);
-
-			-- Click author text = copy config to clipboard (share)
-			Compkiller:_Input(AuthorText, function()
-				if ConfigButton.OnShare then task.spawn(ConfigButton.OnShare); end;
 			end);
 
 			ConfigButton.OnLoad = nil;
@@ -8803,6 +8833,12 @@ function Compkiller.new(Config : Window)
 				end;
 			end);
 
+			-- Refresh config list manually
+			Compkiller:_Input(SectionClose_2, function()
+				Refresh();
+				WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Config list refreshed", Duration = 1.5 });
+			end);
+
 			-- Import from clipboard
 			Compkiller:_Input(SectionClose, function()
 				local ok, raw = pcall(getclipboard);
@@ -8810,8 +8846,24 @@ function Compkiller.new(Config : Window)
 					local ok2, decoded = pcall(HttpService.JSONDecode, HttpService, raw);
 					if ok2 and decoded and decoded.__INFORMATION then
 						local importName = decoded.__INFORMATION.Name or "Imported";
+						-- Apply the config values immediately
 						Configuration.Config:LoadConfigFromString(raw);
+						-- Also persist it to disk so it appears in the list
+						pcall(function()
+							local saveName = importName;
+							-- Avoid overwriting an existing config silently
+							local existing = Configuration.Config:GetConfigs();
+							local nameExists = false;
+							for _, n in next, existing do
+								if n == saveName then nameExists = true; break; end;
+							end;
+							if nameExists then
+								saveName = importName .. "_imported";
+							end;
+							Configuration.Config:WriteConfig({ Name = saveName, Author = decoded.__INFORMATION.Author or WindowArgs.Username });
+						end);
 						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Imported \"" .. importName .. "\" from clipboard", Duration = 3 });
+						Refresh();
 					else
 						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Clipboard is not a valid config", Duration = 2 });
 					end;
@@ -10531,8 +10583,9 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 
 		for i,v in next , listfiles(Args.Directory) do
 			local Name = string.sub(v , #Args.Directory + 2);
-
-			table.insert(names , Name);
+			if Name ~= "__autoload" then
+				table.insert(names , Name);
+			end;
 		end;
 
 		return names;
@@ -10543,12 +10596,14 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 
 		for i,v in next , listfiles(Args.Directory) do
 			local Name = string.sub(v , #Args.Directory + 2);
-			local Info = Args:ReadInfo(Name);
+			if Name ~= "__autoload" then
+				local Info = Args:ReadInfo(Name);
 
-			table.insert(names , {
-				Name = Name,
-				Info = Info,
-			});
+				table.insert(names , {
+					Name = Name,
+					Info = Info,
+				});
+			end;
 		end;
 
 		return names;
@@ -10571,7 +10626,14 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 	end;
 
 	function Args:GetConfigCount()
-		return #listfiles(Args.Directory);
+		local count = 0;
+		for _, v in next, listfiles(Args.Directory) do
+			local Name = string.sub(v, #Args.Directory + 2);
+			if Name ~= "__autoload" then
+				count += 1;
+			end;
+		end;
+		return count;
 	end;
 
 	function Args:LoadConfig(ConfigName: string)
