@@ -3439,7 +3439,7 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 		Label.BackgroundTransparency = 1
 		Label.BorderSizePixel = 0
 		Label.Position = UDim2.new(0, 8, 0.5, 0)
-		Label.Size = UDim2.new(1, -(KEY_W + 14), 1, 0)
+		Label.Size = UDim2.new(0, 100, 1, 0)  -- UpdateScale will resize this
 		Label.ZIndex = MainFrame.ZIndex + 5
 		Label.Font = Enum.Font.Code
 		Label.TextColor3 = Color3.fromRGB(230, 230, 230)
@@ -3455,7 +3455,7 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 		TypeLabel.BackgroundTransparency = 1
 		TypeLabel.BorderSizePixel = 0
 		TypeLabel.Position = UDim2.new(1, -6, 0.5, 0)
-		TypeLabel.Size = UDim2.new(0, KEY_W, 1, 0)
+		TypeLabel.Size = UDim2.new(0, KEY_W, 1, 0)  -- UpdateScale will resize this
 		TypeLabel.ZIndex = MainFrame.ZIndex + 5
 		TypeLabel.Font = Enum.Font.Code
 		TypeLabel.TextColor3 = Compkiller.Colors.Highlight
@@ -3465,8 +3465,28 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 
 		table.insert(Compkiller.Elements.Highlight, { Element = TypeLabel, Property = 'TextColor3' })
 
+		-- Measure both texts and resize label widths + report total to parent loop
+		local GAP = 12
+		local PAD_L = 8
+		local PAD_R = 6
+
 		local UpdateScale = function()
-			Keyholder:SetAttribute('AvgScale', PANEL_W)
+			local nameW = TextService:GetTextSize(
+				Label.Text, Label.TextSize, Label.Font, Vector2.new(math.huge, math.huge)
+			).X
+			local keyW = TextService:GetTextSize(
+				TypeLabel.Text, TypeLabel.TextSize, TypeLabel.Font, Vector2.new(math.huge, math.huge)
+			).X + 8  -- breathing room
+
+			-- resize each label to exactly its content so nothing clips
+			Label.Size     = UDim2.new(0, nameW, 1, 0)
+			TypeLabel.Size = UDim2.new(0, keyW,  1, 0)
+
+			-- position key label so it sits PAD_R from right of the holder
+			TypeLabel.Position = UDim2.new(1, -PAD_R, 0.5, 0)
+
+			local totalW = PAD_L + nameW + GAP + keyW + PAD_R
+			Keyholder:SetAttribute('AvgScale', totalW)
 		end
 		UpdateScale()
 
@@ -3486,7 +3506,6 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 
 		function frame_ref:SetVisible(v)
 			if v then
-				-- no bg tween on the row itself — panel bg handles darkening
 				Keyholder.Size = UDim2.new(1, 0, 0, ROW_H)
 				Compkiller:_Animation(Label,     TweenInfo.new(0.15), { TextTransparency = 0 })
 				Compkiller:_Animation(TypeLabel, TweenInfo.new(0.15), { TextTransparency = 0 })
