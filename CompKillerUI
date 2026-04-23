@@ -11011,7 +11011,11 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 		if isfile(_path) then
 			local info = readfile(_path);
 
-			local decoded = HttpService:JSONDecode(info);
+			local ok, decoded = pcall(HttpService.JSONDecode, HttpService, info);
+
+			if not ok or type(decoded) ~= "table" then
+				return false;
+			end;
 
 			return decoded.__INFORMATION;
 		end;
@@ -11025,7 +11029,10 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 		for i,v in next , listfiles(Args.Directory) do
 			local Name = string.sub(v , #Args.Directory + 2);
 
-			table.insert(names , Name);
+			-- Skip internal marker files that are not real configs
+			if Name ~= "__autoload" and Name ~= "" then
+				table.insert(names , Name);
+			end;
 		end;
 
 		return names;
@@ -11036,12 +11043,20 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 
 		for i,v in next , listfiles(Args.Directory) do
 			local Name = string.sub(v , #Args.Directory + 2);
-			local Info = Args:ReadInfo(Name);
 
-			table.insert(names , {
-				Name = Name,
-				Info = Info,
-			});
+			-- Skip the autoload marker and any other non-config files
+			if Name ~= "__autoload" and Name ~= "" then
+				local Info = Args:ReadInfo(Name);
+
+				-- ReadInfo returns false for unreadable / non-JSON files;
+				-- don't surface those as configs (they'd look broken in the UI)
+				if Info then
+					table.insert(names , {
+						Name = Name,
+						Info = Info,
+					});
+				end;
+			end;
 		end;
 
 		return names;
@@ -11064,7 +11079,14 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 	end;
 
 	function Args:GetConfigCount()
-		return #listfiles(Args.Directory);
+		local count = 0;
+		for i,v in next , listfiles(Args.Directory) do
+			local Name = string.sub(v , #Args.Directory + 2);
+			if Name ~= "__autoload" and Name ~= "" then
+				count = count + 1;
+			end;
+		end;
+		return count;
 	end;
 
 	function Args:ConfigExists(ConfigName: string)
