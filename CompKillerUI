@@ -10794,7 +10794,10 @@ function Compkiller:GetConfig(Type: string)
 	local ConfigFlags = {};
 
 	for i,v in next , Compkiller.Flags do
-		local Value = v:GetValue();
+		-- Wrap GetValue in pcall so a broken flag can't corrupt the entire save
+		local ok, Value = pcall(function() return v:GetValue() end);
+		if not ok then continue end;
+
 		local Suf = {};
 
 		if typeof(Value) == "table" and Value.ColorPicker and typeof(Value.ColorPicker) == 'table' then
@@ -10807,9 +10810,17 @@ function Compkiller:GetConfig(Type: string)
 			Suf.Transparency = Value.ColorPicker.Transparency;
 
 			Suf.Type = "ColorPicker";
-		else
+		elseif typeof(Value) == "boolean" or typeof(Value) == "number" or typeof(Value) == "string" then
+			-- Only save JSON-safe primitives directly
 			Suf.Value = Value;
 			Suf.Type = "NormalElement";
+		elseif typeof(Value) == "table" then
+			-- Tables are fine for multi-select dropdowns etc.
+			Suf.Value = Value;
+			Suf.Type = "NormalElement";
+		else
+			-- Skip non-serializable types (Color3, Vector3, Instance, etc. stored raw)
+			continue;
 		end;
 
 		if Type == "KV" then
@@ -10879,6 +10890,18 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 			CreatedDate = Compkiller:GetDate()
 		};
 
+		local okEncode, encoded = pcall(HttpService.JSONEncode, HttpService, Flags);
+		if not okEncode then
+			warn("[CompKiller Config] Failed to encode config '"..Config.Name.."': "..tostring(encoded));
+			return false;
+		end;
+
+		local okWrite, writeErr = pcall(writefile, Compkiller:_Path(Args.Directory , Config.Name) , encoded);
+		if not okWrite then
+			warn("[CompKiller Config] Failed to write config '"..Config.Name.."': "..tostring(writeErr));
+			return false;
+		end;
+
 		if Args.EnableNotify then
 			notify.new({
 				Title = "Configs",
@@ -10887,7 +10910,7 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 			})
 		end
 
-		writefile(Compkiller:_Path(Args.Directory , Config.Name) , HttpService:JSONEncode(Flags));
+		return true;
 	end;
 
 	function Args:LoadConfigFromString(str: string)
@@ -11062,7 +11085,11 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 		if isfile(_path) then
 			local info = readfile(_path);
 
-			local decoded = HttpService:JSONDecode(info);
+			local okDecode, decoded = pcall(HttpService.JSONDecode, HttpService, info);
+			if not okDecode or type(decoded) ~= "table" then
+				warn("[CompKiller Config] Failed to decode config '"..ConfigName.."': "..tostring(decoded));
+				return false;
+			end;
 
 			local Flags = Compkiller:GetConfig("KV");
 
@@ -11081,21 +11108,25 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 
 					if Value then
 
-						if v.Value.Type == "NormalElement" then
-							Value.Functions:SetValue(v.Value.Value);
+						pcall(function()
+							if v.Value.Type == "NormalElement" then
+								Value.Functions:SetValue(v.Value.Value);
 
-						elseif v.Value.Type == "ColorPicker" then
+							elseif v.Value.Type == "ColorPicker" then
 
-							local Color = Color3.new(v.Value.Color3.R,v.Value.Color3.G,v.Value.Color3.B);
+								local Color = Color3.new(v.Value.Color3.R,v.Value.Color3.G,v.Value.Color3.B);
 
-							local Transparency = v.Value.Transparency;
+								local Transparency = v.Value.Transparency;
 
-							Value.Functions:SetValue(Color , Transparency);
-						end;
+								Value.Functions:SetValue(Color , Transparency);
+							end;
+						end);
 
 						if Value.Functions.AutoKeybind then
 							if v.AutoKeybind then
-								Value.Functions.AutoKeybind:LoadSettings(v.AutoKeybind)
+								pcall(function()
+									Value.Functions.AutoKeybind:LoadSettings(v.AutoKeybind)
+								end);
 							end;
 						end;
 					end;
