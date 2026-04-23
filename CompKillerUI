@@ -8353,7 +8353,7 @@ function Compkiller.new(Config : Window)
 			ConfigBlock.BorderColor3 = Color3.fromRGB(0, 0, 0)
 			ConfigBlock.BorderSizePixel = 0
 			ConfigBlock.BackgroundTransparency = 1
-			ConfigBlock.Size = UDim2.new(1, -1, 0, 70)
+			ConfigBlock.Size = UDim2.new(1, -1, 0, 60)
 			ConfigBlock.ZIndex = 10
 
 			if Compkiller:_IsMobile() then
@@ -8377,7 +8377,7 @@ function Compkiller.new(Config : Window)
 			ConfigText.AnchorPoint = Vector2.new(0, 0)
 			ConfigText.BackgroundTransparency = 1
 			ConfigText.BorderSizePixel = 0
-			ConfigText.Position = UDim2.new(0, 12, 0, 26)
+			ConfigText.Position = UDim2.new(0, 12, 0, 22)
 			ConfigText.Size = UDim2.new(0.55, 0, 0, 18)
 			ConfigText.ZIndex = 11
 			ConfigText.Font = Enum.Font.GothamMedium
@@ -8395,6 +8395,45 @@ function Compkiller.new(Config : Window)
 			ConfigGradient.Transparency = NumberSequence.new{NumberSequenceKeypoint.new(0.00, 0.00), NumberSequenceKeypoint.new(0.85, 0.00), NumberSequenceKeypoint.new(1.00, 1.00)}
 			ConfigGradient.Parent = ConfigText
 
+			-- Inline rename editor (hidden until user clicks the rename icon).
+			-- Positioned identically to ConfigText so the transition feels seamless.
+			local RenameBox = Instance.new("TextBox")
+			RenameBox.Name = Compkiller:_RandomString()
+			RenameBox.Parent = ConfigBlock
+			RenameBox.AnchorPoint = Vector2.new(0, 0)
+			RenameBox.BackgroundColor3 = Compkiller.Colors.BlockColor
+			RenameBox.BackgroundTransparency = 0.3
+			RenameBox.BorderSizePixel = 0
+			RenameBox.Position = UDim2.new(0, 10, 0, 20)
+			RenameBox.Size = UDim2.new(0.55, 0, 0, 22)
+			RenameBox.ZIndex = 15
+			RenameBox.Visible = false
+			RenameBox.ClearTextOnFocus = false
+			RenameBox.Font = Enum.Font.GothamMedium
+			RenameBox.PlaceholderText = "Type new name..."
+			RenameBox.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
+			RenameBox.Text = ""
+			RenameBox.TextColor3 = Compkiller.Colors.SwitchColor
+			RenameBox.TextSize = 13
+			RenameBox.TextXAlignment = Enum.TextXAlignment.Left
+			table.insert(Compkiller.Elements.SwitchColor , { Element = RenameBox, Property = 'TextColor3' });
+			table.insert(Compkiller.Elements.BlockColor , { Element = RenameBox, Property = 'BackgroundColor3' });
+
+			local RenameCorner = Instance.new("UICorner")
+			RenameCorner.CornerRadius = UDim.new(0, 4)
+			RenameCorner.Parent = RenameBox
+
+			local RenameStroke = Instance.new("UIStroke")
+			RenameStroke.Color = Compkiller.Colors.Highlight
+			RenameStroke.Thickness = 1
+			RenameStroke.Parent = RenameBox
+			table.insert(Compkiller.Elements.Highlight , { Element = RenameStroke, Property = 'Color' });
+
+			local RenamePadding = Instance.new("UIPadding")
+			RenamePadding.PaddingLeft = UDim.new(0, 6)
+			RenamePadding.PaddingRight = UDim.new(0, 6)
+			RenamePadding.Parent = RenameBox
+
 			-- ======== Top-right badges: ACTIVE (green), AUTO (blue) ========
 			local BadgeRow = Instance.new("Frame")
 			BadgeRow.Name = Compkiller:_RandomString()
@@ -8402,7 +8441,7 @@ function Compkiller.new(Config : Window)
 			BadgeRow.AnchorPoint = Vector2.new(1, 0)
 			BadgeRow.BackgroundTransparency = 1
 			BadgeRow.BorderSizePixel = 0
-			BadgeRow.Position = UDim2.new(1, -10, 0, 6)
+			BadgeRow.Position = UDim2.new(1, -10, 0, 5)
 			BadgeRow.Size = UDim2.new(0, 120, 0, 13)
 			BadgeRow.ZIndex = 12
 
@@ -8453,8 +8492,8 @@ function Compkiller.new(Config : Window)
 			TopButtons.AnchorPoint = Vector2.new(1, 0)
 			TopButtons.BackgroundTransparency = 1
 			TopButtons.BorderSizePixel = 0
-			TopButtons.Position = UDim2.new(1, -10, 0, 23)
-			TopButtons.Size = UDim2.new(0, 180, 0, 22)
+			TopButtons.Position = UDim2.new(1, -10, 0, 19)
+			TopButtons.Size = UDim2.new(0, 180, 0, 20)
 			TopButtons.ZIndex = 12
 
 			local TopBtnLayout = Instance.new("UIListLayout")
@@ -8474,7 +8513,7 @@ function Compkiller.new(Config : Window)
 				btn.BackgroundColor3 = Compkiller.Colors.Highlight
 				btn.BackgroundTransparency = 1
 				btn.BorderSizePixel = 0
-				btn.Size = UDim2.new(0, 64, 0, 22)
+				btn.Size = UDim2.new(0, 60, 0, 20)
 				btn.ZIndex = 13
 				table.insert(Compkiller.Elements.Highlight , { Element = btn, Property = 'BackgroundColor3' });
 
@@ -8527,7 +8566,7 @@ function Compkiller.new(Config : Window)
 			DelButton.LayoutOrder = 1
 			DelButton.BackgroundTransparency = 1
 			DelButton.BorderSizePixel = 0
-			DelButton.Size = UDim2.new(0, 28, 0, 18)
+			DelButton.Size = UDim2.new(0, 24, 0, 16)
 			DelButton.ZIndex = 13
 			DelButton.Image = Compkiller:CacheImage("rbxassetid://10747362393")
 			DelButton.ImageColor3 = Color3.fromRGB(255, 107, 107)
@@ -8544,8 +8583,8 @@ function Compkiller.new(Config : Window)
 			BottomIcons.AnchorPoint = Vector2.new(0, 1)
 			BottomIcons.BackgroundTransparency = 1
 			BottomIcons.BorderSizePixel = 0
-			BottomIcons.Position = UDim2.new(0, 12, 1, -6)
-			BottomIcons.Size = UDim2.new(0, 100, 0, 16)
+			BottomIcons.Position = UDim2.new(0, 12, 1, -5)
+			BottomIcons.Size = UDim2.new(0, 100, 0, 14)
 			BottomIcons.ZIndex = 12
 
 			local BottomLayout = Instance.new("UIListLayout")
@@ -8554,7 +8593,7 @@ function Compkiller.new(Config : Window)
 			BottomLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 			BottomLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 			BottomLayout.SortOrder = Enum.SortOrder.LayoutOrder
-			BottomLayout.Padding = UDim.new(0, 10)
+			BottomLayout.Padding = UDim.new(0, 12)
 
 			local function _MakeBottomIcon(order, iconId, color)
 				local b = Instance.new("ImageButton")
@@ -8563,7 +8602,7 @@ function Compkiller.new(Config : Window)
 				b.LayoutOrder = order
 				b.BackgroundTransparency = 1
 				b.BorderSizePixel = 0
-				b.Size = UDim2.new(0, 16, 0, 16)
+				b.Size = UDim2.new(0, 14, 0, 14)
 				b.ZIndex = 13
 				b.Image = Compkiller:CacheImage(iconId)
 				b.ImageColor3 = color or Compkiller.Colors.SwitchColor
@@ -8572,16 +8611,16 @@ function Compkiller.new(Config : Window)
 				return b;
 			end;
 
-			-- Clipboard (Share)
-			local ShareBtn = _MakeBottomIcon(1, "rbxassetid://10734950309")
+			-- Clipboard (Share) - lucide-clipboard
+			local ShareBtn = _MakeBottomIcon(1, "rbxassetid://10709799288")
 			table.insert(Compkiller.Elements.SwitchColor , { Element = ShareBtn, Property = 'ImageColor3' });
 
-			-- Rename (pencil)
-			local RenameBtn = _MakeBottomIcon(2, "rbxassetid://10747384394")
+			-- Rename (pencil) - lucide-pencil
+			local RenameBtn = _MakeBottomIcon(2, "rbxassetid://10734919691")
 			table.insert(Compkiller.Elements.SwitchColor , { Element = RenameBtn, Property = 'ImageColor3' });
 
-			-- Auto-load toggle (star — colored blue when enabled to match AUTO badge)
-			local AutoBtn = _MakeBottomIcon(3, "rbxassetid://10734898355")
+			-- Auto-load toggle (star - lucide-star, blue when enabled to match AUTO badge)
+			local AutoBtn = _MakeBottomIcon(3, "rbxassetid://10734966248")
 
 			-- ======== State & API ========
 			local _isActive = false
@@ -8712,8 +8751,68 @@ function Compkiller.new(Config : Window)
 				task.spawn(function() if ConfigButton.OnShare then ConfigButton.OnShare(); end; end);
 			end);
 
+			-- Inline rename: click pencil, the config name becomes an editable field.
+			-- Enter submits with the new name. Click away or Escape cancels.
+			local _renameEscaped = false;
+
+			local function _StartRename()
+				RenameBox.Text = ConfigText.Text;
+				RenameBox.Visible = true;
+				ConfigText.TextTransparency = 1;
+				_renameEscaped = false;
+
+				-- Focus + select all text so typing replaces immediately
+				RenameBox:CaptureFocus();
+				task.defer(function()
+					pcall(function()
+						RenameBox.CursorPosition = #RenameBox.Text + 1;
+						RenameBox.SelectionStart = 1;
+					end);
+				end);
+			end;
+
+			local function _FinishRename(commit)
+				if not RenameBox.Visible then return; end;
+				local newName = RenameBox.Text;
+				RenameBox.Visible = false;
+				RenameBox.Text = "";
+				ConfigText.TextTransparency = 0.1;
+
+				if commit and ConfigButton.OnRename then
+					task.spawn(function() ConfigButton.OnRename(newName); end);
+				end;
+			end;
+
+			-- FocusLost fires with enterPressed=true on Enter, false on any other focus loss
+			RenameBox.FocusLost:Connect(function(enterPressed)
+				if _renameEscaped then
+					_FinishRename(false);
+				else
+					_FinishRename(enterPressed);
+				end;
+			end);
+
+			-- Escape handler: only listen while RenameBox is in focus, disconnect after.
+			local _escConn = nil;
+			RenameBox.Focused:Connect(function()
+				if _escConn then _escConn:Disconnect(); end;
+				_escConn = UserInputService.InputBegan:Connect(function(input)
+					if input.KeyCode == Enum.KeyCode.Escape then
+						_renameEscaped = true;
+						pcall(function() RenameBox:ReleaseFocus(false); end);
+					end;
+				end);
+			end);
+			RenameBox.FocusLost:Connect(function()
+				if _escConn then _escConn:Disconnect(); _escConn = nil; end;
+			end);
+
 			RenameBtn.MouseButton1Click:Connect(function()
-				task.spawn(function() if ConfigButton.OnRename then ConfigButton.OnRename(); end; end);
+				if RenameBox.Visible then
+					_FinishRename(true);
+				else
+					_StartRename();
+				end;
 			end);
 
 			AutoBtn.MouseButton1Click:Connect(function()
@@ -9083,16 +9182,12 @@ function Compkiller.new(Config : Window)
 						end;
 					end;
 
-					-- Rename: read new name from the name TextBox; if empty, short notify
-					Btn.OnRename = function()
-						local newName = _SanitizeName(TextBox.Text);
-						TextBox.Text = "";
-						if newName == "" then
-							_Notify("Type a new name in the box, then click Rename", 3);
-							return;
-						end;
-						if newName == cfgName then
-							_Notify("Name unchanged", 2);
+					-- Rename: inline edit on the row sends the new name via parameter.
+					-- The rename icon toggles an inline TextBox on the row itself.
+					Btn.OnRename = function(proposed)
+						local newName = _SanitizeName(proposed or "");
+						if newName == "" or newName == cfgName then
+							-- Silent cancel — user either left it blank or unchanged
 							return;
 						end;
 						if Configuration.Config:ConfigExists(newName) then
