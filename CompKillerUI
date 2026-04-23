@@ -62,6 +62,10 @@ export type ConfigFunctions = {
 			}
 		}	
 	},
+	ConfigExists: (self: ConfigFunctions , ConfigName: string) -> boolean,
+	RenameConfig: (self: ConfigFunctions , OldName: string , NewName: string) -> boolean,
+	DuplicateConfig: (self: ConfigFunctions , SourceName: string , NewName: string) -> boolean,
+	LoadConfigFromString: (self: ConfigFunctions , str: string) -> any?,
 };
 
 export type KeybindSettings = {
@@ -7757,7 +7761,7 @@ function Compkiller.new(Config : Window)
 		local UIStroke_2 = Instance.new("UIStroke")
 		local Header_2 = Instance.new("Frame")
 		local SectionText_2 = Instance.new("TextLabel")
-		local SectionClose_2 = Instance.new("ImageButton")
+		local SectionClose_2 = Instance.new("ImageLabel")
 		local Frame = Instance.new("Frame")
 		local UIStroke_3 = Instance.new("UIStroke")
 		local UICorner_3 = Instance.new("UICorner")
@@ -7844,7 +7848,7 @@ function Compkiller.new(Config : Window)
 		SectionClose.Position = UDim2.new(1, -12, 0.5, 0)
 		SectionClose.Size = UDim2.new(0, 17, 0, 17)
 		SectionClose.ZIndex = 10
-		SectionClose.Image = Compkiller:CacheImage("rbxassetid://10723344270") -- download/import icon
+		SectionClose.Image = Compkiller:CacheImage("rbxassetid://109535175596957")
 		SectionClose.ImageTransparency = 0.500
 
 
@@ -8352,7 +8356,6 @@ function Compkiller.new(Config : Window)
 			local UICorner_3 = Instance.new("UICorner")
 			local AuthorText = Instance.new("TextLabel")
 			local DelButton = Instance.new("ImageButton")
-			local ShareButton = Instance.new("ImageButton")
 			local UICorner = Instance.new("UICorner")
 			local UIGradient = Instance.new("UIGradient")
 
@@ -8371,29 +8374,13 @@ function Compkiller.new(Config : Window)
 
 			UICorner.CornerRadius = UDim.new(1, 0)
 			UICorner.Parent = DelButton
-
-			-- Share button: copy config JSON to clipboard
-			ShareButton.Name = Compkiller:_RandomString()
-			ShareButton.Parent = LinkValues
-			ShareButton.BackgroundTransparency = 1.000
-			ShareButton.BorderColor3 = Color3.fromRGB(0, 0, 0)
-			ShareButton.BorderSizePixel = 0
-			ShareButton.LayoutOrder = -9998
-			ShareButton.Size = UDim2.new(0, 35, 0, 15)
-			ShareButton.ZIndex = 14
-			ShareButton.Image = Compkiller:CacheImage("rbxassetid://10734950899") -- share/upload icon
-			ShareButton.ImageColor3 = Compkiller.Colors.Highlight
-			ShareButton.ImageTransparency = 0.500
-			ShareButton.ScaleType = Enum.ScaleType.Fit
-
-			table.insert(Compkiller.Elements.Highlight, { Element = ShareButton, Property = "ImageColor3" });
 			ConfigBlock.Name = Compkiller:_RandomString()
 			ConfigBlock.Parent = ScrollingFrame
 			ConfigBlock.BackgroundColor3 = Color3.fromRGB(33, 34, 40)
 			ConfigBlock.BorderColor3 = Color3.fromRGB(0, 0, 0)
 			ConfigBlock.BorderSizePixel = 0
 			ConfigBlock.BackgroundTransparency = 1
-			ConfigBlock.Size = UDim2.new(1, -1, 0, 40)
+			ConfigBlock.Size = UDim2.new(1, -1, 0, 62)
 			ConfigBlock.ZIndex = 10
 
 			if Compkiller:_IsMobile() then
@@ -8661,10 +8648,6 @@ function Compkiller.new(Config : Window)
 						ImageTransparency = 0
 					});
 
-					Compkiller:_Animation(ShareButton,Tween,{
-						ImageTransparency = 0.2
-					});
-
 					Compkiller:_Animation(Frame_2,Tween,{
 						BackgroundTransparency = 0.100
 					});
@@ -8693,10 +8676,6 @@ function Compkiller.new(Config : Window)
 					});
 
 					Compkiller:_Animation(Icon,Tween,{
-						ImageTransparency = 1
-					});
-
-					Compkiller:_Animation(ShareButton,Tween,{
 						ImageTransparency = 1
 					});
 
@@ -8766,40 +8745,154 @@ function Compkiller.new(Config : Window)
 			AutoTag.TextXAlignment = Enum.TextXAlignment.Right
 			table.insert(Compkiller.Elements.Highlight, { Element = AutoTag, Property = "TextColor3" });
 
-			-- Wrap SetInfo to also handle auto-load badge visibility
-			function ConfigButton:SetInfo(Author, ConfigName, isAutoLoad)
-				local R,G,B = tostring(math.floor(Compkiller.Colors.Highlight.R * 255)) , tostring(math.floor(Compkiller.Colors.Highlight.G * 255)) , tostring(math.floor(Compkiller.Colors.Highlight.B * 255));
-				AuthorText.Text = string.format("Author: <font color=\"rgb(%s, %s, %s)\">%s</font>" ,R,G,B , tostring(Author));
-				ConfigText.Text = ConfigName;
-				AutoTag.TextTransparency = (isAutoLoad and 0.1) or 1;
+			-- Active badge (shown when this config is the most recently loaded)
+			local ActiveTag = Instance.new("TextLabel")
+			ActiveTag.Name = Compkiller:_RandomString()
+			ActiveTag.Parent = ConfigBlock
+			ActiveTag.AnchorPoint = Vector2.new(1, 0)
+			ActiveTag.BackgroundTransparency = 1
+			ActiveTag.BorderSizePixel = 0
+			ActiveTag.Position = UDim2.new(1, -60, 0, 4)
+			ActiveTag.Size = UDim2.new(0, 60, 0, 14)
+			ActiveTag.ZIndex = ConfigBlock.ZIndex + 2
+			ActiveTag.Font = Enum.Font.GothamBold
+			ActiveTag.Text = "ACTIVE"
+			ActiveTag.TextColor3 = Color3.fromRGB(120, 220, 140)
+			ActiveTag.TextSize = 9
+			ActiveTag.TextTransparency = 1
+			ActiveTag.TextXAlignment = Enum.TextXAlignment.Right
 
-				if ConfigBlock.BackgroundTransparency >= 0.7 then
-					ConfigButton:Update();
+			-- Icon action row (bottom of config block): Auto, Share, Rename, Duplicate
+			local ActionRow = Instance.new("Frame")
+			ActionRow.Name = Compkiller:_RandomString()
+			ActionRow.Parent = ConfigBlock
+			ActionRow.AnchorPoint = Vector2.new(0, 1)
+			ActionRow.BackgroundTransparency = 1
+			ActionRow.BorderSizePixel = 0
+			ActionRow.Position = UDim2.new(0, 10, 1, -4)
+			ActionRow.Size = UDim2.new(1, -20, 0, 18)
+			ActionRow.ZIndex = ConfigBlock.ZIndex + 3
+
+			local ActionLayout = Instance.new("UIListLayout")
+			ActionLayout.Parent = ActionRow
+			ActionLayout.FillDirection = Enum.FillDirection.Horizontal
+			ActionLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+			ActionLayout.SortOrder = Enum.SortOrder.LayoutOrder
+			ActionLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+			ActionLayout.Padding = UDim.new(0, 8)
+
+			local function _MakeActionButton(order, iconId, tooltip, color)
+				local btn = Instance.new("Frame")
+				btn.Name = Compkiller:_RandomString()
+				btn.Parent = ActionRow
+				btn.BackgroundTransparency = 1
+				btn.BorderSizePixel = 0
+				btn.LayoutOrder = order
+				btn.Size = UDim2.new(0, 18, 0, 18)
+				btn.ZIndex = ActionRow.ZIndex + 1
+
+				local img = Instance.new("ImageLabel")
+				img.Name = Compkiller:_RandomString()
+				img.Parent = btn
+				img.AnchorPoint = Vector2.new(0.5, 0.5)
+				img.BackgroundTransparency = 1
+				img.BorderSizePixel = 0
+				img.Position = UDim2.new(0.5, 0, 0.5, 0)
+				img.Size = UDim2.new(1, 0, 1, 0)
+				img.ZIndex = btn.ZIndex
+				img.Image = Compkiller:CacheImage(iconId)
+				img.ImageColor3 = color or Compkiller.Colors.SwitchColor
+				img.ImageTransparency = 1
+
+				local lbl = Instance.new("TextLabel")
+				lbl.Name = Compkiller:_RandomString()
+				lbl.Parent = btn
+				lbl.AnchorPoint = Vector2.new(0, 0.5)
+				lbl.BackgroundTransparency = 1
+				lbl.BorderSizePixel = 0
+				lbl.Position = UDim2.new(1, 2, 0.5, 0)
+				lbl.Size = UDim2.new(0, 0, 1, 0)
+				lbl.ZIndex = btn.ZIndex
+				lbl.Font = Enum.Font.GothamMedium
+				lbl.Text = tooltip
+				lbl.TextColor3 = color or Compkiller.Colors.SwitchColor
+				lbl.TextSize = 10
+				lbl.TextTransparency = 1
+				lbl.TextXAlignment = Enum.TextXAlignment.Left
+				lbl.AutomaticSize = Enum.AutomaticSize.X
+
+				if not color then
+					table.insert(Compkiller.Elements.SwitchColor , { Element = img, Property = 'ImageColor3' });
+					table.insert(Compkiller.Elements.SwitchColor , { Element = lbl, Property = 'TextColor3' });
 				end;
+
+				return btn, img, lbl;
+			end;
+
+			local AutoBtn, AutoIcon, AutoLabel = _MakeActionButton(1, "rbxassetid://10734898355", "Auto", Compkiller.Colors.Highlight);
+			table.insert(Compkiller.Elements.Highlight , { Element = AutoIcon, Property = 'ImageColor3' });
+			table.insert(Compkiller.Elements.Highlight , { Element = AutoLabel, Property = 'TextColor3' });
+
+			local ShareBtn, ShareIcon, ShareLabel = _MakeActionButton(2, "rbxassetid://10734950309", "Share");
+			local RenameBtn, RenameIcon, RenameLabel = _MakeActionButton(3, "rbxassetid://10747384394", "Rename");
+			local DupeBtn, DupeIcon, DupeLabel = _MakeActionButton(4, "rbxassetid://10709755401", "Copy");
+
+			-- Wrap SetInfo to handle auto-load badge + active badge
+			local _origSetInfo = ConfigButton.SetInfo;
+			function ConfigButton:SetInfo(Author, ConfigName, isAutoLoad, isActive)
+				_origSetInfo(self, Author, ConfigName);
+				AutoTag.TextTransparency = (isAutoLoad and 0.1) or 1;
+				ActiveTag.TextTransparency = (isActive and 0.1) or 1;
+			end;
+
+			-- Wrap Toggle to also animate the action row icons/labels
+			local _origToggle = ConfigButton.Toggle;
+			function ConfigButton:Toggle(v)
+				_origToggle(self, v);
+
+				local iconTargetT = (v and 0.2) or 1;
+				local labelTargetT = (v and 0.3) or 1;
+
+				Compkiller:_Animation(AutoIcon, Tween, { ImageTransparency = iconTargetT });
+				Compkiller:_Animation(ShareIcon, Tween, { ImageTransparency = iconTargetT });
+				Compkiller:_Animation(RenameIcon, Tween, { ImageTransparency = iconTargetT });
+				Compkiller:_Animation(DupeIcon, Tween, { ImageTransparency = iconTargetT });
+
+				Compkiller:_Animation(AutoLabel, Tween, { TextTransparency = labelTargetT });
+				Compkiller:_Animation(ShareLabel, Tween, { TextTransparency = labelTargetT });
+				Compkiller:_Animation(RenameLabel, Tween, { TextTransparency = labelTargetT });
+				Compkiller:_Animation(DupeLabel, Tween, { TextTransparency = labelTargetT });
 			end;
 
 			ConfigButton:Update();
 
 			Compkiller:_Input(LoadButton, function()
-				task.spawn(ConfigButton.OnLoad);
+				task.spawn(function() if ConfigButton.OnLoad then ConfigButton.OnLoad(); end; end);
 			end);
 
 			Compkiller:_Input(SaveButton, function()
-				task.spawn(ConfigButton.OnSave);
+				task.spawn(function() if ConfigButton.OnSave then ConfigButton.OnSave(); end; end);
 			end);
 
 			DelButton.MouseButton1Click:Connect(function()
-				task.spawn(ConfigButton.OnDelete);
+				task.spawn(function() if ConfigButton.OnDelete then ConfigButton.OnDelete(DelButton); end; end);
 			end);
 
-			-- Click share button = copy config JSON to clipboard
-			ShareButton.MouseButton1Click:Connect(function()
-				if ConfigButton.OnShare then task.spawn(ConfigButton.OnShare); end;
+			-- Action row bindings
+			Compkiller:_Input(AutoBtn, function()
+				task.spawn(function() if ConfigButton.OnAutoLoad then ConfigButton.OnAutoLoad(); end; end);
 			end);
 
-			-- Click config name = toggle auto-load
-			Compkiller:_Input(ConfigText, function()
-				if ConfigButton.OnAutoLoad then task.spawn(ConfigButton.OnAutoLoad); end;
+			Compkiller:_Input(ShareBtn, function()
+				task.spawn(function() if ConfigButton.OnShare then ConfigButton.OnShare(); end; end);
+			end);
+
+			Compkiller:_Input(RenameBtn, function()
+				task.spawn(function() if ConfigButton.OnRename then ConfigButton.OnRename(); end; end);
+			end);
+
+			Compkiller:_Input(DupeBtn, function()
+				task.spawn(function() if ConfigButton.OnDuplicate then ConfigButton.OnDuplicate(); end; end);
 			end);
 
 			ConfigButton.OnLoad = nil;
@@ -8807,6 +8900,8 @@ function Compkiller.new(Config : Window)
 			ConfigButton.OnDelete = nil;
 			ConfigButton.OnAutoLoad = nil;
 			ConfigButton.OnShare = nil;
+			ConfigButton.OnRename = nil;
+			ConfigButton.OnDuplicate = nil;
 
 			return ConfigButton;
 		end;
@@ -8815,58 +8910,214 @@ function Compkiller.new(Config : Window)
 			local __signals = {};
 			local Init = {};
 			local _autoLoadName = nil;
+			local _activeName = nil;    -- most recently loaded config this session
+			local _filterText = "";     -- search filter
 			local AutoLoadPath = Compkiller:_Path(Configuration.Config.Directory, "__autoload");
 
 			if isfile(AutoLoadPath) then
-				_autoLoadName = readfile(AutoLoadPath);
+				local ok, raw = pcall(readfile, AutoLoadPath);
+				if ok and raw and raw:byte() then
+					_autoLoadName = raw;
+				end;
+			end;
+
+			-- Sanitize a user-supplied config name: trim + strip filesystem-hostile chars
+			local function _SanitizeName(s)
+				if not s then return ""; end;
+				s = tostring(s);
+				-- trim leading/trailing whitespace
+				s = s:gsub("^%s+", ""):gsub("%s+$", "");
+				-- strip path separators and other bad chars
+				s = s:gsub("[/\\\"\'%c]", "");
+				-- never allow reserved name
+				if s == "__autoload" then s = ""; end;
+				return s;
+			end;
+
+			local function _Notify(content, duration)
+				WindowArgs.Notify.new({
+					Title = "Configs",
+					Icon = Compkiller:_GetIcon("folder"),
+					Content = content,
+					Duration = duration or 2
+				});
+			end;
+
+			-- Upgrade the "Add Config" section: use TextBox for Enter-to-submit, repurpose
+			-- the header-close icon to be an explicit IMPORT button with a visible label.
+			do
+				-- Give the import icon a recognizable clipboard-style hint next to it
+				local hint = Header:FindFirstChild("__ImportHint");
+				if not hint then
+					hint = Instance.new("TextLabel");
+					hint.Name = "__ImportHint";
+					hint.Parent = Header;
+					hint.AnchorPoint = Vector2.new(1, 0.5);
+					hint.BackgroundTransparency = 1;
+					hint.BorderSizePixel = 0;
+					hint.Position = UDim2.new(1, -34, 0.5, 0);
+					hint.Size = UDim2.new(0, 60, 0, 18);
+					hint.ZIndex = SectionClose.ZIndex;
+					hint.Font = Enum.Font.GothamMedium;
+					hint.Text = "Import";
+					hint.TextColor3 = Compkiller.Colors.SwitchColor;
+					hint.TextSize = 11;
+					hint.TextTransparency = 0.4;
+					hint.TextXAlignment = Enum.TextXAlignment.Right;
+					table.insert(Compkiller.Elements.SwitchColor , { Element = hint, Property = 'TextColor3' });
+				end;
+
+				-- Add a search box above the scrolling frame
+				if not ConfigList:FindFirstChild("__SearchFrame") then
+					local searchFrame = Instance.new("Frame");
+					searchFrame.Name = "__SearchFrame";
+					searchFrame.Parent = ConfigList;
+					searchFrame.AnchorPoint = Vector2.new(0.5, 0);
+					searchFrame.BackgroundColor3 = Compkiller.Colors.BlockColor;
+					searchFrame.BackgroundTransparency = 0.4;
+					searchFrame.BorderSizePixel = 0;
+					searchFrame.Position = UDim2.new(0.5, 0, 0, 35);
+					searchFrame.Size = UDim2.new(1, -20, 0, 22);
+					searchFrame.ZIndex = ScrollingFrame.ZIndex;
+					table.insert(Compkiller.Elements.BlockColor , { Element = searchFrame, Property = 'BackgroundColor3' });
+
+					local searchCorner = Instance.new("UICorner");
+					searchCorner.CornerRadius = UDim.new(0, 4);
+					searchCorner.Parent = searchFrame;
+
+					local searchStroke = Instance.new("UIStroke");
+					searchStroke.Color = Compkiller.Colors.StrokeColor;
+					searchStroke.Parent = searchFrame;
+					table.insert(Compkiller.Elements.StrokeColor , { Element = searchStroke, Property = 'Color' });
+
+					local searchIcon = Instance.new("ImageLabel");
+					searchIcon.Parent = searchFrame;
+					searchIcon.AnchorPoint = Vector2.new(0, 0.5);
+					searchIcon.BackgroundTransparency = 1;
+					searchIcon.Position = UDim2.new(0, 6, 0.5, 0);
+					searchIcon.Size = UDim2.new(0, 12, 0, 12);
+					searchIcon.ZIndex = searchFrame.ZIndex + 1;
+					searchIcon.Image = Compkiller:CacheImage("rbxassetid://10747373760");
+					searchIcon.ImageColor3 = Compkiller.Colors.SwitchColor;
+					searchIcon.ImageTransparency = 0.5;
+					table.insert(Compkiller.Elements.SwitchColor , { Element = searchIcon, Property = 'ImageColor3' });
+
+					local searchBox = Instance.new("TextBox");
+					searchBox.Name = "__SearchBox";
+					searchBox.Parent = searchFrame;
+					searchBox.AnchorPoint = Vector2.new(0, 0.5);
+					searchBox.BackgroundTransparency = 1;
+					searchBox.BorderSizePixel = 0;
+					searchBox.Position = UDim2.new(0, 24, 0.5, 0);
+					searchBox.Size = UDim2.new(1, -30, 1, -2);
+					searchBox.ZIndex = searchFrame.ZIndex + 1;
+					searchBox.ClearTextOnFocus = false;
+					searchBox.Font = Enum.Font.GothamMedium;
+					searchBox.PlaceholderColor3 = Color3.fromRGB(150, 150, 150);
+					searchBox.PlaceholderText = "Search configs...";
+					searchBox.Text = "";
+					searchBox.TextColor3 = Compkiller.Colors.SwitchColor;
+					searchBox.TextSize = 12;
+					searchBox.TextXAlignment = Enum.TextXAlignment.Left;
+					table.insert(Compkiller.Elements.SwitchColor , { Element = searchBox, Property = 'TextColor3' });
+
+					-- Shift the scrolling frame down to make room for the search bar
+					ScrollingFrame.Position = UDim2.new(0.5, 0, 0, 62);
+					ScrollingFrame.Size = UDim2.new(1, -10, 1, -72);
+
+					searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+						_filterText = string.lower(searchBox.Text);
+						if Init.Refresh then Init.Refresh(); end;
+					end);
+
+					Init._SearchBox = searchBox;
+				end;
 			end;
 
 			local Refresh;
 
-			Compkiller:_Input(Button,function()
-				if TextBox.Text:byte() then
-					local name = TextBox.Text;
+			local function _CreateConfig(rawName)
+				local name = _SanitizeName(rawName);
+				if name == "" then
+					_Notify("Config name cannot be empty", 2);
+					return false;
+				end;
+				if Configuration.Config:ConfigExists(name) then
+					_Notify("\"" .. name .. "\" already exists", 2);
+					return false;
+				end;
+				Configuration.Config:WriteConfig({ Name = name, Author = WindowArgs.Username });
+				_activeName = name;
+				_Notify("Created \"" .. name .. "\"", 2);
+				Refresh();
+				return true;
+			end;
+
+			Compkiller:_Input(Button, function()
+				local txt = TextBox.Text;
+				TextBox.Text = "";
+				_CreateConfig(txt);
+			end);
+
+			-- Enter in the name box also creates the config
+			TextBox.FocusLost:Connect(function(enterPressed)
+				if enterPressed and TextBox.Text:byte() then
+					local txt = TextBox.Text;
 					TextBox.Text = "";
-					Configuration.Config:WriteConfig({ Name = name, Author = WindowArgs.Username });
-					WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Created \"" .. name .. "\"", Duration = 2 });
-					Refresh();
+					_CreateConfig(txt);
 				end;
 			end);
 
-			-- Refresh config list manually
-			Compkiller:_Input(SectionClose_2, function()
-				Refresh();
-				WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Config list refreshed", Duration = 1.5 });
-			end);
-
-			-- Import from clipboard
+			-- Import from clipboard (explicit, labeled)
 			Compkiller:_Input(SectionClose, function()
 				local ok, raw = pcall(getclipboard);
+				if not (ok and raw and raw:byte()) then
+					_Notify("Clipboard is empty", 2);
+					return;
+				end;
+				local ok2, decoded = pcall(HttpService.JSONDecode, HttpService, raw);
+				if not (ok2 and decoded and decoded.__INFORMATION) then
+					_Notify("Clipboard is not a valid config", 2);
+					return;
+				end;
+
+				local importName = _SanitizeName(decoded.__INFORMATION.Name or "Imported");
+				if importName == "" then importName = "Imported"; end;
+
+				-- If a config with this name already exists, append a numeric suffix
+				local finalName = importName;
+				local suffix = 2;
+				while Configuration.Config:ConfigExists(finalName) do
+					finalName = importName .. "_" .. suffix;
+					suffix = suffix + 1;
+					if suffix > 99 then break; end;
+				end;
+
+				-- Update the embedded name to match the stored filename
+				decoded.__INFORMATION.Name = finalName;
+				local reEncoded;
+				local okEnc, enc = pcall(HttpService.JSONEncode, HttpService, decoded);
+				if okEnc then reEncoded = enc; else reEncoded = raw; end;
+
+				local _path = Compkiller:_Path(Configuration.Config.Directory, finalName);
+				local okWrite = pcall(writefile, _path, reEncoded);
+				if not okWrite then
+					_Notify("Failed to save imported config", 2);
+					return;
+				end;
+
+				_Notify("Imported \"" .. finalName .. "\"", 3);
+				Refresh();
+			end);
+
+			-- Also repurpose the second close icon on the "Add Config" section as a
+			-- quick "paste into name box" shortcut, since it's unused otherwise.
+			Compkiller:_Input(SectionClose_2, function()
+				local ok, raw = pcall(getclipboard);
 				if ok and raw and raw:byte() then
-					local ok2, decoded = pcall(HttpService.JSONDecode, HttpService, raw);
-					if ok2 and decoded and decoded.__INFORMATION then
-						local importName = decoded.__INFORMATION.Name or "Imported";
-						-- Apply the config values immediately
-						Configuration.Config:LoadConfigFromString(raw);
-						-- Also persist it to disk so it appears in the list
-						pcall(function()
-							local saveName = importName;
-							-- Avoid overwriting an existing config silently
-							local existing = Configuration.Config:GetConfigs();
-							local nameExists = false;
-							for _, n in next, existing do
-								if n == saveName then nameExists = true; break; end;
-							end;
-							if nameExists then
-								saveName = importName .. "_imported";
-							end;
-							Configuration.Config:WriteConfig({ Name = saveName, Author = decoded.__INFORMATION.Author or WindowArgs.Username });
-						end);
-						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Imported \"" .. importName .. "\" from clipboard", Duration = 3 });
-						Refresh();
-					else
-						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Clipboard is not a valid config", Duration = 2 });
-					end;
+					-- Only paste the first line, and sanitize
+					local firstLine = raw:match("[^\r\n]+") or "";
+					TextBox.Text = _SanitizeName(firstLine):sub(1, 64);
 				end;
 			end);
 
@@ -8880,58 +9131,233 @@ function Compkiller.new(Config : Window)
 				for i,v in next, __signals do v:Disconnect(); end;
 				__signals = {};
 
+				-- Sort: auto-load first, then active, then alphabetically
+				table.sort(FullConfig, function(a, b)
+					local aAuto = (a.Name == _autoLoadName) and 1 or 0;
+					local bAuto = (b.Name == _autoLoadName) and 1 or 0;
+					if aAuto ~= bAuto then return aAuto > bAuto; end;
+					local aAct = (a.Name == _activeName) and 1 or 0;
+					local bAct = (b.Name == _activeName) and 1 or 0;
+					if aAct ~= bAct then return aAct > bAct; end;
+					return string.lower(a.Name) < string.lower(b.Name);
+				end);
+
+				local shownCount = 0;
+
 				for i, v in next, FullConfig do
 					local cfgInfo = v.Info or {};
 					local cfgName = v.Name;
 
+					-- Hide the internal autoload marker file, and apply search filter
+					local _skip = false;
+					if cfgName == "__autoload" then _skip = true; end;
+					if (not _skip) and _filterText ~= "" and not string.find(string.lower(cfgName), _filterText, 1, true) then
+						_skip = true;
+					end;
+
+					if not _skip then
+
+					shownCount = shownCount + 1;
+
 					local Btn = TabArgs:_DrawConfig();
-					Btn:SetInfo(cfgInfo.Author or "Unknown", cfgName, _autoLoadName == cfgName);
+					Btn:SetInfo(
+						cfgInfo.Author or "Unknown",
+						cfgName,
+						_autoLoadName == cfgName,
+						_activeName == cfgName
+					);
 
 					table.insert(__signals, TabOpenSignal:Connect(function(open)
 						Btn:Toggle(open);
 					end));
 
+					-- Load
 					Btn.OnLoad = function()
-						Configuration.Config:LoadConfig(cfgName);
-						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Loaded \"" .. cfgName .. "\"", Duration = 2 });
+						local ok, err = pcall(function()
+							Configuration.Config:LoadConfig(cfgName);
+						end);
+						if ok then
+							_activeName = cfgName;
+							_Notify("Loaded \"" .. cfgName .. "\"", 2);
+							Refresh();
+						else
+							_Notify("Failed to load \"" .. cfgName .. "\"", 3);
+						end;
 					end;
 
+					-- Save (overwrite with current UI state)
 					Btn.OnSave = function()
-						Configuration.Config:WriteConfig({ Name = cfgName, Author = cfgInfo.Author or WindowArgs.Username });
-						Btn:SetInfo(cfgInfo.Author or WindowArgs.Username, cfgName, _autoLoadName == cfgName);
-						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Saved \"" .. cfgName .. "\"", Duration = 2 });
+						local ok = pcall(function()
+							Configuration.Config:WriteConfig({
+								Name = cfgName,
+								Author = cfgInfo.Author or WindowArgs.Username
+							});
+						end);
+						if ok then
+							_activeName = cfgName;
+							Btn:SetInfo(
+								cfgInfo.Author or WindowArgs.Username,
+								cfgName,
+								_autoLoadName == cfgName,
+								_activeName == cfgName
+							);
+							_Notify("Saved \"" .. cfgName .. "\"", 2);
+						else
+							_Notify("Failed to save \"" .. cfgName .. "\"", 3);
+						end;
 					end;
 
-					Btn.OnDelete = function()
+					-- Delete (with two-step confirmation baked into the delete button itself)
+					local _deleteArmed = false;
+					local _deleteArmThread;
+					Btn.OnDelete = function(delBtnRef)
+						if not _deleteArmed then
+							_deleteArmed = true;
+							-- Visual confirm: brighter + tween scale
+							if delBtnRef then
+								delBtnRef.ImageColor3 = Color3.fromRGB(255, 80, 80);
+								delBtnRef.ImageTransparency = 0;
+							end;
+							_Notify("Click delete again to confirm", 2);
+							_deleteArmThread = task.delay(3, function()
+								_deleteArmed = false;
+								if delBtnRef and delBtnRef.Parent then
+									delBtnRef.ImageColor3 = Color3.fromRGB(255, 107, 107);
+									delBtnRef.ImageTransparency = 0.5;
+								end;
+							end);
+							return;
+						end;
+
+						if _deleteArmThread then
+							task.cancel(_deleteArmThread);
+							_deleteArmThread = nil;
+						end;
+
 						Configuration.Config:DeleteConfig(cfgName);
 						if _autoLoadName == cfgName then
 							_autoLoadName = nil;
 							pcall(delfile, AutoLoadPath);
 						end;
-						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Deleted \"" .. cfgName .. "\"", Duration = 2 });
+						if _activeName == cfgName then
+							_activeName = nil;
+						end;
+						_Notify("Deleted \"" .. cfgName .. "\"", 2);
 						Refresh();
 					end;
 
+					-- Auto-load toggle
 					Btn.OnAutoLoad = function()
 						if _autoLoadName == cfgName then
 							_autoLoadName = nil;
 							pcall(delfile, AutoLoadPath);
-							WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Auto-load disabled", Duration = 2 });
+							_Notify("Auto-load disabled", 2);
 						else
 							_autoLoadName = cfgName;
 							pcall(writefile, AutoLoadPath, cfgName);
-							WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "\"" .. cfgName .. "\" will auto-load on start", Duration = 2 });
+							_Notify("\"" .. cfgName .. "\" will auto-load on start", 3);
 						end;
 						Refresh();
 					end;
 
+					-- Share: copy raw config JSON to clipboard
 					Btn.OnShare = function()
 						local _path = Compkiller:_Path(Configuration.Config.Directory, cfgName);
 						if isfile(_path) then
-							pcall(setclipboard, readfile(_path));
-							WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "\"" .. cfgName .. "\" copied to clipboard", Duration = 2 });
+							local ok, raw = pcall(readfile, _path);
+							if ok and raw then
+								local setOk = pcall(setclipboard, raw);
+								if setOk then
+									_Notify("\"" .. cfgName .. "\" copied to clipboard", 2);
+								else
+									_Notify("Clipboard unavailable on this executor", 3);
+								end;
+							else
+								_Notify("Could not read config file", 2);
+							end;
 						end;
 					end;
+
+					-- Rename: read new name from the name TextBox; if empty, short notify
+					Btn.OnRename = function()
+						local newName = _SanitizeName(TextBox.Text);
+						TextBox.Text = "";
+						if newName == "" then
+							_Notify("Type a new name in the box, then click Rename", 3);
+							return;
+						end;
+						if newName == cfgName then
+							_Notify("Name unchanged", 2);
+							return;
+						end;
+						if Configuration.Config:ConfigExists(newName) then
+							_Notify("\"" .. newName .. "\" already exists", 2);
+							return;
+						end;
+						local ok = Configuration.Config:RenameConfig(cfgName, newName);
+						if ok then
+							if _autoLoadName == cfgName then
+								_autoLoadName = newName;
+								pcall(writefile, AutoLoadPath, newName);
+							end;
+							if _activeName == cfgName then
+								_activeName = newName;
+							end;
+							_Notify("Renamed to \"" .. newName .. "\"", 2);
+							Refresh();
+						else
+							_Notify("Rename failed", 2);
+						end;
+					end;
+
+					-- Duplicate: makes a copy called "<name>_copy" (auto-increment suffix)
+					Btn.OnDuplicate = function()
+						local base = cfgName .. "_copy";
+						local candidate = base;
+						local suffix = 2;
+						while Configuration.Config:ConfigExists(candidate) do
+							candidate = base .. suffix;
+							suffix = suffix + 1;
+							if suffix > 99 then
+								_Notify("Too many copies", 2);
+								return;
+							end;
+						end;
+						local ok = Configuration.Config:DuplicateConfig(cfgName, candidate);
+						if ok then
+							_Notify("Duplicated as \"" .. candidate .. "\"", 2);
+							Refresh();
+						else
+							_Notify("Duplicate failed", 2);
+						end;
+					end;
+
+					end; -- closes: if not _skip then
+				end;
+
+				-- Empty-state message when search turns up nothing
+				if shownCount == 0 then
+					local empty = Instance.new("Frame");
+					empty.Name = "__EmptyMsg";
+					empty.Parent = ScrollingFrame;
+					empty.BackgroundTransparency = 1;
+					empty.Size = UDim2.new(1, -10, 0, 40);
+					empty.ZIndex = ScrollingFrame.ZIndex + 1;
+
+					local lbl = Instance.new("TextLabel");
+					lbl.Parent = empty;
+					lbl.BackgroundTransparency = 1;
+					lbl.Size = UDim2.new(1, 0, 1, 0);
+					lbl.Font = Enum.Font.GothamMedium;
+					lbl.Text = (_filterText ~= "")
+						and ("No configs match \"" .. _filterText .. "\"")
+						or "No configs yet — type a name below and click Add Config";
+					lbl.TextColor3 = Compkiller.Colors.SwitchColor;
+					lbl.TextSize = 12;
+					lbl.TextTransparency = 0.4;
+					lbl.TextWrapped = true;
+					lbl.ZIndex = empty.ZIndex + 1;
+					table.insert(Compkiller.Elements.SwitchColor , { Element = lbl, Property = 'TextColor3' });
 				end;
 
 				ScrollingFrame.CanvasSize = UDim2.fromOffset(0, UIListLayout.AbsoluteContentSize.Y + 5);
@@ -8943,19 +9369,34 @@ function Compkiller.new(Config : Window)
 			if _autoLoadName then
 				task.delay(0.5, function()
 					if isfile(Compkiller:_Path(Configuration.Config.Directory, _autoLoadName)) then
-						Configuration.Config:LoadConfig(_autoLoadName);
-						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Auto-loaded \"" .. _autoLoadName .. "\"", Duration = 3 });
+						local ok = pcall(function()
+							Configuration.Config:LoadConfig(_autoLoadName);
+						end);
+						if ok then
+							_activeName = _autoLoadName;
+							_Notify("Auto-loaded \"" .. _autoLoadName .. "\"", 3);
+							Refresh();
+						end;
+					else
+						-- Auto-load target was deleted externally; clear stale pointer.
+						_autoLoadName = nil;
+						pcall(delfile, AutoLoadPath);
 					end;
 				end);
 			end;
 
+			-- Safety poll for external changes (files created/deleted outside the UI).
+			-- Runs only every 2 seconds and only when the tab is visible, so it's cheap.
 			Init.THREAD = task.spawn(function()
 				local OldIndex = Configuration.Config:GetConfigCount();
-				while true do task.wait(0.5);
-					local CountInDirectory = Configuration.Config:GetConfigCount();
-					if OldIndex ~= CountInDirectory then
-						OldIndex = CountInDirectory;
-						Refresh();
+				while true do
+					task.wait(2);
+					if TabConfig.Visible then
+						local CountInDirectory = Configuration.Config:GetConfigCount();
+						if OldIndex ~= CountInDirectory then
+							OldIndex = CountInDirectory;
+							Refresh();
+						end;
 					end;
 				end;
 			end);
@@ -10583,9 +11024,8 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 
 		for i,v in next , listfiles(Args.Directory) do
 			local Name = string.sub(v , #Args.Directory + 2);
-			if Name ~= "__autoload" then
-				table.insert(names , Name);
-			end;
+
+			table.insert(names , Name);
 		end;
 
 		return names;
@@ -10596,14 +11036,12 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 
 		for i,v in next , listfiles(Args.Directory) do
 			local Name = string.sub(v , #Args.Directory + 2);
-			if Name ~= "__autoload" then
-				local Info = Args:ReadInfo(Name);
+			local Info = Args:ReadInfo(Name);
 
-				table.insert(names , {
-					Name = Name,
-					Info = Info,
-				});
-			end;
+			table.insert(names , {
+				Name = Name,
+				Info = Info,
+			});
 		end;
 
 		return names;
@@ -10626,14 +11064,57 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 	end;
 
 	function Args:GetConfigCount()
-		local count = 0;
-		for _, v in next, listfiles(Args.Directory) do
-			local Name = string.sub(v, #Args.Directory + 2);
-			if Name ~= "__autoload" then
-				count += 1;
-			end;
+		return #listfiles(Args.Directory);
+	end;
+
+	function Args:ConfigExists(ConfigName: string)
+		return isfile(Compkiller:_Path(Args.Directory , ConfigName));
+	end;
+
+	function Args:RenameConfig(OldName: string , NewName: string)
+		if not OldName or not NewName or OldName == NewName then return false; end;
+
+		local _oldPath = Compkiller:_Path(Args.Directory , OldName);
+		local _newPath = Compkiller:_Path(Args.Directory , NewName);
+
+		if not isfile(_oldPath) then return false; end;
+		if isfile(_newPath) then return false; end; -- do not overwrite
+
+		local raw = readfile(_oldPath);
+
+		-- Update the embedded __INFORMATION.Name so it stays in sync with the filename
+		local ok, decoded = pcall(HttpService.JSONDecode , HttpService , raw);
+		if ok and decoded and decoded.__INFORMATION then
+			decoded.__INFORMATION.Name = NewName;
+			raw = HttpService:JSONEncode(decoded);
 		end;
-		return count;
+
+		writefile(_newPath , raw);
+		delfile(_oldPath);
+
+		return true;
+	end;
+
+	function Args:DuplicateConfig(SourceName: string , NewName: string)
+		if not SourceName or not NewName then return false; end;
+
+		local _srcPath = Compkiller:_Path(Args.Directory , SourceName);
+		local _newPath = Compkiller:_Path(Args.Directory , NewName);
+
+		if not isfile(_srcPath) then return false; end;
+		if isfile(_newPath) then return false; end;
+
+		local raw = readfile(_srcPath);
+
+		local ok, decoded = pcall(HttpService.JSONDecode , HttpService , raw);
+		if ok and decoded and decoded.__INFORMATION then
+			decoded.__INFORMATION.Name = NewName;
+			decoded.__INFORMATION.CreatedDate = Compkiller:GetDate();
+			raw = HttpService:JSONEncode(decoded);
+		end;
+
+		writefile(_newPath , raw);
+		return true;
 	end;
 
 	function Args:LoadConfig(ConfigName: string)
