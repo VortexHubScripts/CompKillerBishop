@@ -8353,7 +8353,7 @@ function Compkiller.new(Config : Window)
 			ConfigBlock.BorderColor3 = Color3.fromRGB(0, 0, 0)
 			ConfigBlock.BorderSizePixel = 0
 			ConfigBlock.BackgroundTransparency = 1
-			ConfigBlock.Size = UDim2.new(1, -1, 0, 66)
+			ConfigBlock.Size = UDim2.new(1, -1, 0, 48)
 			ConfigBlock.ZIndex = 10
 
 			if Compkiller:_IsMobile() then
@@ -8580,11 +8580,11 @@ function Compkiller.new(Config : Window)
 			local BottomIcons = Instance.new("Frame")
 			BottomIcons.Name = Compkiller:_RandomString()
 			BottomIcons.Parent = ConfigBlock
-			BottomIcons.AnchorPoint = Vector2.new(0, 1)
+			BottomIcons.AnchorPoint = Vector2.new(0, 0)
 			BottomIcons.BackgroundTransparency = 1
 			BottomIcons.BorderSizePixel = 0
-			BottomIcons.Position = UDim2.new(0, 12, 1, -5)
-			BottomIcons.Size = UDim2.new(0, 100, 0, 14)
+			BottomIcons.Position = UDim2.new(0, 12, 0, 24)
+			BottomIcons.Size = UDim2.new(0, 100, 0, 20)
 			BottomIcons.ZIndex = 12
 
 			local BottomLayout = Instance.new("UIListLayout")
