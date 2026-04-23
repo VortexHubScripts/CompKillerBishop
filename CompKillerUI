@@ -3577,6 +3577,7 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 		ToggleBtn.Position = UDim2.new(1, -5, 0.5, 0)
 		ToggleBtn.Size = UDim2.new(0, 30, 0, ROW_HEIGHT)
 		ToggleBtn.ZIndex = MainFrame.ZIndex + 4
+		ToggleBtn.Active = true
 
 		UICorner_3.CornerRadius = UDim.new(0, 4)
 		UICorner_3.Parent = ToggleBtn
@@ -3592,6 +3593,7 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 		ToggleTrack.Size = UDim2.new(0, 26, 0, 14)
 		ToggleTrack.ZIndex = MainFrame.ZIndex + 5
 		ToggleTrack.ClipsDescendants = false
+		ToggleTrack.Active = true
 
 		UICorner_4.CornerRadius = UDim.new(1, 0)
 		UICorner_4.Parent = ToggleTrack
@@ -3610,6 +3612,7 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 		ToggleKnob.Position = UDim2.new(0, 8, 0.5, 0)
 		ToggleKnob.Size = UDim2.new(0, 10, 0, 10)
 		ToggleKnob.ZIndex = MainFrame.ZIndex + 7
+		ToggleKnob.Active = true
 
 		UICorner_5.CornerRadius = UDim.new(1, 0)
 		UICorner_5.Parent = ToggleKnob
@@ -3677,14 +3680,17 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 			end;
 		end;
 
-		-- Click handler on the toggle area
-		ToggleBtn.InputBegan:Connect(function(Input)
+		-- Click handler on the toggle track (visible pill) and knob
+		local function onToggleClick(Input)
 			if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 				if frame_ref._onToggle then
 					frame_ref._onToggle(not _toggleState);
 				end;
 			end;
-		end);
+		end;
+
+		ToggleTrack.InputBegan:Connect(onToggleClick);
+		ToggleKnob.InputBegan:Connect(onToggleClick);
 
 		function frame_ref:SetVisible(v)
 			if v then
