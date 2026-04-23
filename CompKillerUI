@@ -10477,11 +10477,19 @@ function Compkiller.new(Config : Window)
 
 	-- DrawSettings: populates the built-in UserSettings panel (opened via avatar click)
 	function WindowArgs:DrawSettings()
+		-- Idempotent: if DrawSettings has already been called (either automatically
+		-- as part of Compkiller.new or manually by the user), return the previously
+		-- created ElementAPI so the caller can still add custom sections on top.
+		if WindowArgs._SettingsAPI then
+			return WindowArgs._SettingsAPI;
+		end;
+
 		if not WindowArgs.UserSettings.Create then
 			return;
 		end;
 
 		local ElementAPI = WindowArgs.UserSettings:Create();
+		WindowArgs._SettingsAPI = ElementAPI;
 
 		-- Section: Appearance --
 		local AppearanceSection = ElementAPI:DrawSection({
@@ -10756,6 +10764,12 @@ function Compkiller.new(Config : Window)
 			end
 		end);
 	end);
+
+	-- Built-in UI Settings: auto-populates the settings panel with Appearance,
+	-- Custom Colors, Controls, and Performance sections. Script authors can
+	-- still call Window:DrawSettings() manually to get the ElementAPI for adding
+	-- their own sections — the call is idempotent.
+	pcall(function() WindowArgs:DrawSettings(); end);
 
 	return WindowArgs;
 end;
