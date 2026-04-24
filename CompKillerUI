@@ -11258,16 +11258,16 @@ function Compkiller.newNotify()
 
 	NotifyContainer.Name = Compkiller:_RandomString()
 	NotifyContainer.Parent = Notification
-	NotifyContainer.AnchorPoint = Vector2.new(1, 0)
+	NotifyContainer.AnchorPoint = Vector2.new(0, 1)
 	NotifyContainer.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 	NotifyContainer.BackgroundTransparency = 1.000
 	NotifyContainer.BorderColor3 = Color3.fromRGB(0, 0, 0)
 	NotifyContainer.BorderSizePixel = 0
-	NotifyContainer.Position = UDim2.new(1, -10, 0, 1)
+	NotifyContainer.Position = UDim2.new(0, 10, 1, -10)
 	NotifyContainer.Size = UDim2.new(0, 100, 0, 100)
 
 	UIListLayout.Parent = NotifyContainer
-	UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 	UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	UIListLayout.Padding = UDim.new(0, 3)
 
@@ -11297,7 +11297,7 @@ function Compkiller.newNotify()
 
 			BlockFrame.Name = Compkiller:_RandomString()
 			BlockFrame.Parent = NotifyContainer
-			BlockFrame.AnchorPoint = Vector2.new(1, 0)
+			BlockFrame.AnchorPoint = Vector2.new(0, 0)
 			BlockFrame.BackgroundColor3 = Compkiller.Colors.BGDBColor
 			BlockFrame.BackgroundTransparency = 1.000
 			BlockFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
@@ -11316,7 +11316,7 @@ function Compkiller.newNotify()
 			NotifyFrame.ClipsDescendants = false
 			NotifyFrame.Size = UDim2.new(1, 0, 1, -5)
 			NotifyFrame.ZIndex = 2
-			NotifyFrame.Position = UDim2.new(1,200,0,0)
+			NotifyFrame.Position = UDim2.new(-1,-200,0,0)
 
 
 			UICorner.CornerRadius = UDim.new(0, 4)
@@ -11424,7 +11424,7 @@ function Compkiller.newNotify()
 
 			local Close = function()
 				Compkiller:_Animation(NotifyFrame,TweenInfo.new(0.65,Enum.EasingStyle.Quint),{
-					Position = UDim2.new(1,200,0,0)
+					Position = UDim2.new(-1,-200,0,0)
 				});
 
 				task.wait(0.3);
