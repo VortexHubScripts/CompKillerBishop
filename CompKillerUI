@@ -416,6 +416,13 @@ Compkiller.IaDrag = false;
 Compkiller.LastDrag = tick();
 Compkiller.Flags = {};
 
+-- Tracks whether ANY Compkiller window is currently open. Used by the dropdown,
+-- color-picker, and keybind global InputBegan handlers to early-out when the menu
+-- is closed. Without this gate, every left/right click in the game runs through
+-- ~50+ callbacks (one per dropdown/colorpicker/keybind) doing AbsolutePosition
+-- reads, which causes noticeable input lag during PVP.
+Compkiller.UIOpen = false;
+
 Compkiller.Lucide = {
 	['lucide-mouse-2'] = "rbxassetid://10088146939",
 	['lucide-internet'] = "rbxassetid://12785195438",
@@ -3098,6 +3105,13 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		end;
 	end;
 
+	do
+		local _winSig = Compkiller.WindowSignals and Compkiller.WindowSignals[Window];
+		if _winSig then
+			_winSig:Connect(function(v) if not v then ToggleUI(false) end end);
+		end;
+	end;
+
 	Button.MouseButton1Click:Connect(function()
 		ToggleUI(true);
 	end)
@@ -3174,6 +3188,8 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 	end)
 
 	UserInputService.InputBegan:Connect(function(Input)
+		-- Fast path: only matters when UI is open AND this picker is open.
+		if not Compkiller.UIOpen then return end;
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 			if not Compkiller:_IsMouseOverFrame(ColorPickerWindow) then
 				ToggleUI(false);
@@ -3712,6 +3728,13 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 
 	ToggleUI(false);
 
+	do
+		local _winSig = Compkiller.WindowSignals and Compkiller.WindowSignals[Window];
+		if _winSig then
+			_winSig:Connect(function(v) if not v then ToggleUI(false) end end);
+		end;
+	end;
+
 	KB_Signal:Connect(ToggleUI);
 
 	local APIRef = {
@@ -3872,6 +3895,8 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 	end);
 
 	UserInputService.InputBegan:Connect(function(Input)
+		-- Only the keybind PICKER cares about clicks-outside; bail when UI is closed.
+		if not Compkiller.UIOpen then return end;
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.MouseButton2 or Input.UserInputType == Enum.UserInputType.Touch then
 			if not Compkiller:_IsMouseOverFrame(Parent) and not Compkiller:_IsMouseOverFrame(KeybindHandler) then
 				KB_Signal:Fire(false);
@@ -4164,7 +4189,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			Toggle.ChangeValue(Config.Default);
 
-			Config.Callback(Config.Default);
+			task.spawn(Config.Callback, Config.Default);
 		end;
 
 		function Args:GetValue()
@@ -4301,17 +4326,28 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 		ToggleUI(false);
 
+		do
+			local _winSig = Compkiller.WindowSignals and Compkiller.WindowSignals[Window];
+			if _winSig then
+				_winSig:Connect(function(v) if not v then ToggleUI(false) end end);
+			end;
+		end;
+
 		Element.MouseButton1Click:Connect(function()
 			ToggleUI(true);
 		end);
 
 		UserInputService.InputBegan:Connect(function(Input)
+			-- Fast path: bail out cheaply when the UI is closed so left clicks
+			-- in-game don't pay for AbsolutePosition reads on every dropdown.
+			if not Compkiller.UIOpen then return end;
+			if not Toggl then return end;
 			if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-				if Toggl and not Compkiller:_IsMouseOverFrame(ExtractElement) and not Compkiller:_IsMouseOverFrame(Element) then
+				if not Compkiller:_IsMouseOverFrame(ExtractElement) and not Compkiller:_IsMouseOverFrame(Element) then
 					ToggleUI(false);
 				end;
 			end
-		end)		
+		end)
 
 		return Compkiller:_LoadElement(Elements , true , Signal)
 	end;
@@ -4442,6 +4478,13 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	end;
 
 	ToggleUI(false)
+
+	do
+		local _winSig = Compkiller.WindowSignals and Compkiller.WindowSignals[Window];
+		if _winSig then
+			_winSig:Connect(function(v) if not v then ToggleUI(false) end end);
+		end;
+	end;
 
 	-- Fix: keep the dropdown pinned to BaseParent while the tab scrolls
 	do
@@ -4638,11 +4681,12 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	local _closedByInputBegan = false;
 
 	UserInputService.InputBegan:Connect(function(Input)
+		-- Fast path: skip when UI is closed (PVP perf fix).
+		if not Compkiller.UIOpen then return end;
+		if not ToggleDb:GetValue() then return end;  -- only matters when this dropdown is open
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 			if not Compkiller:_IsMouseOverFrame(DropdownWindow) then
-				if ToggleDb:GetValue() then
-					_closedByInputBegan = Compkiller:_IsMouseOverFrame(BaseParent);
-				end;
+				_closedByInputBegan = Compkiller:_IsMouseOverFrame(BaseParent);
 				ToggleUI(false);
 			end;
 		end;
@@ -4748,7 +4792,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			Block:SetTransparency((Config.Default and 0.1) or 0.3);
 
-			Config.Callback(Config.Default);
+			task.spawn(Config.Callback, Config.Default);
 		end;
 
 		Args.Signal = Signal:Connect(function(bool)
@@ -5242,7 +5286,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		Frame.BorderSizePixel = 0
 		Frame.Position = UDim2.new(1, 5, 0.5, 0)
 		Frame.Rotation = 45.000
-		Frame.Size = UDim2.new(1, 0, 1, 0)
+		Frame.Size = UDim2.new(1.3, 0, 1.3, 0)
 		Frame.SizeConstraint = Enum.SizeConstraint.RelativeYY
 		Frame.ZIndex = Zindex + 6
 
@@ -5254,8 +5298,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		UICorner_3.CornerRadius = UDim.new(3, 0)
 		UICorner_3.Parent = Frame
 
-		UIScale.Parent = Frame
-		UIScale.Scale = 1.300
+		UIScale:Destroy()
 
 		ValueText.Name = Compkiller:_RandomString()
 		ValueText.Parent = Slider
@@ -6476,6 +6519,10 @@ function Compkiller.new(Config : Window)
 		Notify = Compkiller.newNotify()
 	};
 
+	-- Window starts open, so set the global flag accordingly. This is the flag
+	-- that gates the dropdown / colorpicker / keybind global InputBegan handlers.
+	Compkiller.UIOpen = true;
+
 	WindowArgs.Username = LocalPlayer.Name;
 
 	if Compkiller:_IsMobile() then
@@ -6519,6 +6566,9 @@ function Compkiller.new(Config : Window)
 	WindowArgs.Root = CompKiller;
 
 	table.insert(Compkiller.Windows , CompKiller);
+
+	Compkiller.WindowSignals = Compkiller.WindowSignals or {};
+	Compkiller.WindowSignals[CompKiller] = WindowOpen;
 
 	MainFrame.Active = true;
 	MainFrame.Name = Compkiller:_RandomString()
@@ -10402,6 +10452,11 @@ function Compkiller.new(Config : Window)
 				MainFrame.Visible = Value;
 			end;
 
+			-- Update the global open-state flag so internal InputBegan handlers
+			-- (dropdowns, color pickers, keybinds) can early-out when the menu
+			-- is closed. This is the main perf win for PVP-while-menu-closed.
+			Compkiller.UIOpen = Value;
+
 			WindowOpen:Fire(Value);
 
 			if Value then
@@ -11258,18 +11313,16 @@ function Compkiller.newNotify()
 
 	NotifyContainer.Name = Compkiller:_RandomString()
 	NotifyContainer.Parent = Notification
-	NotifyContainer.AnchorPoint = Vector2.new(1, 1)
+	NotifyContainer.AnchorPoint = Vector2.new(1, 0)
 	NotifyContainer.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 	NotifyContainer.BackgroundTransparency = 1.000
 	NotifyContainer.BorderColor3 = Color3.fromRGB(0, 0, 0)
 	NotifyContainer.BorderSizePixel = 0
-	NotifyContainer.Position = UDim2.new(1, -10, 1, -10)
+	NotifyContainer.Position = UDim2.new(1, -10, 0, 1)
 	NotifyContainer.Size = UDim2.new(0, 100, 0, 100)
 
 	UIListLayout.Parent = NotifyContainer
 	UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
-	UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
-	UIListLayout.FillDirection = Enum.FillDirection.Vertical
 	UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	UIListLayout.Padding = UDim.new(0, 3)
 
