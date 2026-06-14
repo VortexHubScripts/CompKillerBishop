@@ -10448,6 +10448,7 @@ function Compkiller.new(Config : Window)
 
 		local ThemeDropdown = AppearanceSection:AddDropdown({
 			Name = "Theme",
+			Flag = "UI_Theme",
 			Default = "Default",
 			Values = ThemeNames,
 			Callback = function(value)
@@ -10489,6 +10490,7 @@ function Compkiller.new(Config : Window)
 
 			local picker = ColorSection:AddColorPicker({
 				Name = label,
+				Flag = "UI_Color_" .. key,
 				Default = Compkiller.Colors[key],
 				Callback = function(color)
 					if key == "Highlight" then
