@@ -9202,9 +9202,42 @@ function Compkiller.new(Config : Window)
 
 			Refresh();
 
-			-- Auto-load on startup
+			-- Auto-load on startup.
+			-- This used to fire on a fixed 0.5s delay. On large or async-built UIs the
+			-- consumer is often still creating tabs/toggles at that moment, so any flag
+			-- not yet registered in Compkiller.Flags is missing from the GetConfig("KV")
+			-- snapshot taken inside LoadConfig -- its saved value is never applied and its
+			-- Callback never fires. That's the "toggle looks ON but its runtime is dead,
+			-- needs a manual off->on" bug. We now wait until flag registration has settled
+			-- (no new flags for a short window) before loading, with a hard cap so a
+			-- partially-built UI can never hang startup.
 			if _autoLoadName then
-				task.delay(0.5, function()
+				task.spawn(function()
+					local function flagCount()
+						local n = 0;
+						for _ in next, Compkiller.Flags do n += 1; end;
+						return n;
+					end;
+
+					local STABLE_TARGET = 0.4;  -- settled once no new flag appears for this long
+					local MAX_WAIT      = 8;     -- absolute ceiling; never block startup forever
+
+					local last     = -1;
+					local stableFor = 0;
+					local elapsed   = 0;
+					while elapsed < MAX_WAIT do
+						local dt = task.wait();
+						elapsed += dt;
+						local c = flagCount();
+						if c > 0 and c == last then
+							stableFor += dt;
+							if stableFor >= STABLE_TARGET then break; end;
+						else
+							stableFor = 0;
+							last = c;
+						end;
+					end;
+
 					if isfile(Compkiller:_Path(Configuration.Config.Directory, _autoLoadName)) then
 						local ok = pcall(function()
 							Configuration.Config:LoadConfig(_autoLoadName);
