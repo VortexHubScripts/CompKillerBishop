@@ -6602,7 +6602,7 @@ function Compkiller.new(Config : Window)
 	UIListLayout.Padding = UDim.new(0, 4)
 
 	Userinfo.Name = Compkiller:_RandomString()
-	Userinfo.Parent = TabFrame
+	-- Userinfo.Parent = TabFrame -- commented out: hides account name and image
 	Userinfo.AnchorPoint = Vector2.new(0, 1)
 	Userinfo.BackgroundTransparency = 1.000
 	Userinfo.BorderColor3 = Color3.fromRGB(0, 0, 0)
