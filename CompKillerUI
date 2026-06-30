@@ -4282,6 +4282,14 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	UICorner.CornerRadius = UDim.new(0, 6)
 	UICorner.Parent = DropdownWindow
 
+	local DropdownBlocker = Instance.new("TextButton")
+	DropdownBlocker.Size = UDim2.fromScale(1, 1)
+	DropdownBlocker.BackgroundTransparency = 1
+	DropdownBlocker.TextTransparency = 1
+	DropdownBlocker.ZIndex = BaseZ_Index + 1
+	DropdownBlocker.AutoButtonColor = false
+	DropdownBlocker.Parent = DropdownWindow
+
 	ScrollingFrame.Parent = DropdownWindow
 	ScrollingFrame.Active = true
 	ScrollingFrame.AnchorPoint = Vector2.new(0.5, 0.5)
