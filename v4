@@ -9339,6 +9339,25 @@ function Compkiller.new(Config : Window)
 		});
 		_themeDropdown = themeDropdown;
 
+		AppearanceSection:AddSlider({
+			Name      = "UI Opacity",
+			Flag      = "UIOpacity",
+			Min       = 10,
+			Max       = 100,
+			Default   = 75,
+			Increment = 5,
+			Round     = 0,
+			Type      = "%",
+			Callback  = function(value)
+				local transparency = 1 - (value / 100);
+				for _, v in next, Compkiller.Elements.BGDBColor do
+					if v.Element and v.Property == "BackgroundColor3" then
+						pcall(function() v.Element.BackgroundTransparency = transparency end);
+					end;
+				end;
+			end,
+		});
+
 		-- Called by every color picker callback; switches theme label to Custom
 		-- only once Init() has settled (avoids corrupting the saved UITheme flag
 		-- while LoadConfig async callbacks are still running).
@@ -9469,6 +9488,44 @@ function Compkiller.new(Config : Window)
 			Flag     = "UIToggleKeybind",
 			Callback = function(key)
 				pcall(function() WindowArgs:SetMenuKey(key) end);
+			end,
+		});
+
+		-- ── Behavior ─────────────────────────────────────────────────────
+		local BehaviorSection = UITab:DrawSection({
+			Name     = "Behavior",
+			Position = "left",
+		});
+
+		-- Hide UI on Execute: when the saved config restores this flag as true
+		-- (during the auto-load phase, before _uiReady = true), the window is
+		-- immediately hidden so the UI never appears on screen after execute.
+		-- Toggling it ON/OFF after Init() just saves the preference for next run.
+		BehaviorSection:AddToggle({
+			Name     = "Hide UI on Execute",
+			Flag     = "UIHideOnExecute",
+			Default  = false,
+			Callback = function(v)
+				if not _uiReady then
+					-- Config auto-load phase: apply the saved preference right now.
+					pcall(function() WindowArgs:SetVisible(not v) end);
+				end;
+			end,
+		});
+
+		-- ── Performance ───────────────────────────────────────────────────
+		local PerformanceSection = UITab:DrawSection({
+			Name     = "Performance",
+			Position = "left",
+		});
+
+		PerformanceSection:AddToggle({
+			Name     = "Performance Mode",
+			Flag     = "UIPerformanceMode",
+			Default  = false,
+			Callback = function(v)
+				pcall(function() Compkiller:OptimizeMode(v) end);
+				WindowArgs.PerformanceMode = v;
 			end,
 		});
 
