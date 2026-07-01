@@ -9311,6 +9311,10 @@ function Compkiller.new(Config : Window)
 		local _uiReady        = false; -- gates switchToCustom() until Init() fires
 		local _configInitDone = false; -- gates SetValue("Custom") until 3s post-load
 
+		-- Rainbow accent state
+		local _rainbowThread = nil;
+		local _rainbowHue    = 0;
+
 		local UITab = WindowArgs:DrawTab({
 			Name            = Configuration.Name,
 			Icon            = Configuration.Icon,
@@ -9457,6 +9461,111 @@ function Compkiller.new(Config : Window)
 			end,
 		});
 
+		-- ── Color Presets ────────────────────────────────────────────────
+		local ColorPresetsSection = UITab:DrawSection({
+			Name     = "Color Presets",
+			Position = "left",
+		});
+
+		local PRESET_DIR       = "BishopHub/ColorPresets";
+		local _presetDropdown  = nil;
+		local _presetNameValue = "";
+
+		local function colorToTable(c)
+			return { r = c.R, g = c.G, b = c.B };
+		end;
+
+		local function tableToColor(t)
+			return Color3.new(t.r or 0, t.g or 0, t.b or 0);
+		end;
+
+		local function getPresetNames()
+			if not isfolder(PRESET_DIR) then return {} end;
+			local names = {};
+			for _, path in ipairs(listfiles(PRESET_DIR)) do
+				local n = path:match("([^/\\]+)%.json$");
+				if n then table.insert(names, n) end;
+			end;
+			return names;
+		end;
+
+		local function refreshPresetDropdown()
+			if not _presetDropdown then return end;
+			local names = getPresetNames();
+			if #names == 0 then names = { "(none)" } end;
+			pcall(function() _presetDropdown:SetValues(names) end);
+		end;
+
+		local _initPresetNames = getPresetNames();
+		if #_initPresetNames == 0 then _initPresetNames = { "(none)" } end;
+
+		_presetDropdown = ColorPresetsSection:AddDropdown({
+			Name    = "Select Preset",
+			Values  = _initPresetNames,
+			Default = _initPresetNames[1],
+		});
+
+		ColorPresetsSection:AddTextBox({
+			Name        = "Preset Name",
+			Default     = "",
+			Placeholder = "Enter name...",
+			Callback    = function(v) _presetNameValue = v end,
+		});
+
+		ColorPresetsSection:AddButton({
+			Name     = "Save Current Colors",
+			Callback = function()
+				local name = _presetNameValue;
+				if name == "" then return end;
+				pcall(function()
+					if not isfolder(PRESET_DIR) then makefolder(PRESET_DIR) end;
+					local hs = game:GetService("HttpService");
+					local data = {
+						Accent     = colorToTable(Compkiller.Colors.Highlight       or Color3.new(0,1,1)),
+						Background = colorToTable(Compkiller.Colors.BGDBColor       or Color3.new()),
+						BlockBG    = colorToTable(Compkiller.Colors.BlockBackground or Color3.new()),
+						Block      = colorToTable(Compkiller.Colors.BlockColor      or Color3.new()),
+						Dropdown   = colorToTable(Compkiller.Colors.DropColor       or Color3.new()),
+						Border     = colorToTable(Compkiller.Colors.StrokeColor     or Color3.new()),
+						HighBorder = colorToTable(Compkiller.Colors.HighStrokeColor or Color3.new()),
+						Separator  = colorToTable(Compkiller.Colors.LineColor       or Color3.new()),
+						Text       = colorToTable(Compkiller.Colors.SwitchColor     or Color3.new()),
+					};
+					writefile(PRESET_DIR .. "/" .. name .. ".json", hs:JSONEncode(data));
+				end);
+				refreshPresetDropdown();
+			end,
+		});
+
+		ColorPresetsSection:AddButton({
+			Name     = "Load Selected Preset",
+			Callback = function()
+				local sel;
+				pcall(function() sel = _presetDropdown:GetValue() end);
+				if not sel or sel == "(none)" then return end;
+				local path = PRESET_DIR .. "/" .. sel .. ".json";
+				if not isfile(path) then return end;
+				pcall(function()
+					local hs   = game:GetService("HttpService");
+					local data = hs:JSONDecode(readfile(path));
+					if not data then return end;
+					if data.Accent     then Compkiller:ChangeHighlightColor(tableToColor(data.Accent)) end;
+					if data.Background then applyColor("BGDBColor",       tableToColor(data.Background)) end;
+					if data.BlockBG    then applyColor("BlockBackground", tableToColor(data.BlockBG)) end;
+					if data.Block      then applyColor("BlockColor",      tableToColor(data.Block)) end;
+					if data.Dropdown   then applyColor("DropColor",       tableToColor(data.Dropdown)) end;
+					if data.Border     then applyColor("StrokeColor",     tableToColor(data.Border)) end;
+					if data.HighBorder then applyColor("HighStrokeColor", tableToColor(data.HighBorder)) end;
+					if data.Separator  then applyColor("LineColor",       tableToColor(data.Separator)) end;
+					if data.Text       then applyColor("SwitchColor",     tableToColor(data.Text)) end;
+					Compkiller:SetTheme("Custom");
+					if _configInitDone then
+						pcall(function() themeDropdown:SetValue("Custom") end);
+					end;
+				end);
+			end,
+		});
+
 		-- ── Controls ─────────────────────────────────────────────────────
 		local ControlsSection = UITab:DrawSection({
 			Name     = "Controls",
@@ -9472,19 +9581,15 @@ function Compkiller.new(Config : Window)
 			end,
 		});
 
-		-- Hide UI on Execute: when the saved config restores this flag as true
-		-- (during the auto-load phase, before _uiReady = true), the window is
-		-- immediately hidden so the UI never appears on screen after execute.
-		-- Toggling it ON/OFF after Init() just saves the preference for next run.
-		-- _configInitDone stays false until 3 s after Init(), which safely
-		-- outlasts the auto-load callbacks, so the hide fires at the right time.
+		-- Uses Toggle() so the keybind can bring it back. SetVisible() would
+		-- disable the root ScreenGui, which Toggle() never re-enables.
 		ControlsSection:AddToggle({
 			Name     = "Hide UI on Execute",
 			Flag     = "UIHideOnExecute",
 			Default  = false,
 			Callback = function(v)
 				if not _configInitDone then
-					pcall(function() WindowArgs:SetVisible(not v) end);
+					pcall(function() WindowArgs:Toggle(not v) end);
 				end;
 			end,
 		});
@@ -9504,6 +9609,41 @@ function Compkiller.new(Config : Window)
 			Default  = true,
 			Callback = function(v)
 				pcall(function() WindowArgs:SetWatermarkVisible(v) end);
+			end,
+		});
+
+		ControlsSection:AddToggle({
+			Name     = "Rainbow Accent",
+			Flag     = "UIRainbowAccent",
+			Default  = false,
+			Callback = function(v)
+				if v then
+					_rainbowThread = task.spawn(function()
+						while true do
+							_rainbowHue = (_rainbowHue + 0.002) % 1;
+							local color = Color3.fromHSV(_rainbowHue, 1, 1);
+							pcall(function() Compkiller:ChangeHighlightColor(color) end);
+							task.wait();
+						end;
+					end);
+				else
+					if _rainbowThread then
+						task.cancel(_rainbowThread);
+						_rainbowThread = nil;
+					end;
+				end;
+			end,
+		});
+
+		ControlsSection:AddSlider({
+			Name     = "FPS Cap",
+			Flag     = "UIFpsCap",
+			Min      = 0,
+			Max      = 360,
+			Default  = 60,
+			Round    = 0,
+			Callback = function(v)
+				pcall(function() setfpscap(v) end);
 			end,
 		});
 
