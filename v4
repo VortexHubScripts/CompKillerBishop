@@ -9476,14 +9476,34 @@ function Compkiller.new(Config : Window)
 		-- (during the auto-load phase, before _uiReady = true), the window is
 		-- immediately hidden so the UI never appears on screen after execute.
 		-- Toggling it ON/OFF after Init() just saves the preference for next run.
+		-- _configInitDone stays false until 3 s after Init(), which safely
+		-- outlasts the auto-load callbacks, so the hide fires at the right time.
 		ControlsSection:AddToggle({
 			Name     = "Hide UI on Execute",
 			Flag     = "UIHideOnExecute",
 			Default  = false,
 			Callback = function(v)
-				if not _uiReady then
+				if not _configInitDone then
 					pcall(function() WindowArgs:SetVisible(not v) end);
 				end;
+			end,
+		});
+
+		ControlsSection:AddToggle({
+			Name     = "Enable Notifications",
+			Flag     = "UIEnableNotifications",
+			Default  = true,
+			Callback = function(v)
+				Compkiller.NotificationsEnabled = v;
+			end,
+		});
+
+		ControlsSection:AddToggle({
+			Name     = "Watermark",
+			Flag     = "UIWatermark",
+			Default  = true,
+			Callback = function(v)
+				pcall(function() WindowArgs:SetWatermarkVisible(v) end);
 			end,
 		});
 
@@ -10420,6 +10440,7 @@ function Compkiller.new(Config : Window)
 
 			Watermark.Name = Compkiller:_RandomString()
 			Watermark.Parent = CompKiller
+			WindowArgs._WatermarkRoot = Watermark;
 			Watermark.AnchorPoint = Vector2.new(1, 0)
 			Watermark.BackgroundColor3 = Compkiller.Colors.BGDBColor
 
@@ -10607,6 +10628,12 @@ function Compkiller.new(Config : Window)
 			end;
 
 			return Args;
+		end;
+
+		function WindowArgs:SetWatermarkVisible(visible: boolean)
+			if WindowArgs._WatermarkRoot then
+				WindowArgs._WatermarkRoot.Visible = visible;
+			end;
 		end;
 
 		function WindowArgs:Toggle(Value: boolean)
@@ -11490,6 +11517,8 @@ function Compkiller.newNotify()
 
 	Compkiller.NOTIFY_CACHE = {
 		new = function(Notify: Notify) : NotifyPayback
+			if Compkiller.NotificationsEnabled == false then return {} end;
+
 			Notify = Compkiller.__CONFIG(Notify, {
 				Icon = Compkiller.Logo,
 				Title = "Notification",
