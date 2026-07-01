@@ -383,18 +383,18 @@ local Compkiller = {
 };
 
 Compkiller.Colors = {
-	Highlight       = Color3.fromRGB(32, 210, 245),   -- slightly softer cyan, less harsh
-	Toggle          = Color3.fromRGB(28, 185, 210),   -- matches softened highlight
-	Risky           = Color3.fromRGB(251, 255, 39),
-	BGDBColor       = Color3.fromRGB(16, 17, 22),     -- darker base for more depth
-	BlockColor      = Color3.fromRGB(23, 24, 30),     -- darker so elements pop against panels
-	StrokeColor     = Color3.fromRGB(50, 52, 62),     -- much more visible inner borders
-	SwitchColor     = Color3.fromRGB(225, 228, 240),  -- soft off-white, easier on eyes
-	DropColor       = Color3.fromRGB(30, 31, 38),     -- clearly distinct from BlockColor
-	MouseEnter      = Color3.fromRGB(58, 62, 74),     -- noticeable hover feedback
-	BlockBackground = Color3.fromRGB(38, 40, 50),     -- blue-tinted to contrast all layers
-	LineColor       = Color3.fromRGB(68, 70, 84),     -- clearly visible dividers
-	HighStrokeColor = Color3.fromRGB(62, 65, 78),     -- visible panel outlines
+	Highlight       = Color3.fromRGB(88, 182, 255),   -- sky blue accent — modern & readable
+	Toggle          = Color3.fromRGB(60, 150, 230),   -- darker shade of accent for toggle state
+	Risky           = Color3.fromRGB(255, 196, 48),   -- warm amber warning
+	BGDBColor       = Color3.fromRGB(10, 12, 18),     -- deep midnight base
+	BlockColor      = Color3.fromRGB(18, 21, 32),     -- element row fill — sits above BGDBColor
+	StrokeColor     = Color3.fromRGB(42, 50, 74),     -- inner borders — clearly visible blue-gray
+	SwitchColor     = Color3.fromRGB(208, 218, 240),  -- cool off-white — easier to read than pure white
+	DropColor       = Color3.fromRGB(15, 18, 28),     -- dropdown bg — slightly darker than BlockColor
+	MouseEnter      = Color3.fromRGB(56, 68, 98),     -- hover — noticeable without being jarring
+	BlockBackground = Color3.fromRGB(22, 27, 42),     -- section panels — blue-tinted, distinct layer
+	LineColor       = Color3.fromRGB(38, 46, 68),     -- dividers — blue-tinted instead of neutral gray
+	HighStrokeColor = Color3.fromRGB(52, 63, 92),     -- panel outlines — visible depth
 };
 
 Compkiller.Elements = {
@@ -6219,18 +6219,18 @@ function Compkiller:SetTheme(name)
 		};
 	elseif name == "Default" then
 		Compkiller.Colors = {
-			Highlight = Color3.fromRGB(17, 238, 253),
-			Toggle = Color3.fromRGB(14, 203, 213),
-			Risky = Color3.fromRGB(251, 255, 39),
-			BGDBColor = Color3.fromRGB(22, 24, 29),
-			BlockColor = Color3.fromRGB(28, 29, 34),
-			StrokeColor = Color3.fromRGB(37, 38, 43),
-			SwitchColor = Color3.fromRGB(255, 255, 255),
-			DropColor = Color3.fromRGB(33, 35, 39),
-			MouseEnter = Color3.fromRGB(55, 58, 65),
-			BlockBackground = Color3.fromRGB(39, 40, 47),
-			LineColor = Color3.fromRGB(65, 65, 65),
-			HighStrokeColor = Color3.fromRGB(55, 56, 63),
+			Highlight       = Color3.fromRGB(88, 182, 255),
+			Toggle          = Color3.fromRGB(60, 150, 230),
+			Risky           = Color3.fromRGB(255, 196, 48),
+			BGDBColor       = Color3.fromRGB(10, 12, 18),
+			BlockColor      = Color3.fromRGB(18, 21, 32),
+			StrokeColor     = Color3.fromRGB(42, 50, 74),
+			SwitchColor     = Color3.fromRGB(208, 218, 240),
+			DropColor       = Color3.fromRGB(15, 18, 28),
+			MouseEnter      = Color3.fromRGB(56, 68, 98),
+			BlockBackground = Color3.fromRGB(22, 27, 42),
+			LineColor       = Color3.fromRGB(38, 46, 68),
+			HighStrokeColor = Color3.fromRGB(52, 63, 92),
 		};
 	elseif name == "Dark Blue" then
 		Compkiller.Colors = {
@@ -9374,7 +9374,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Accent",
 			Flag     = "UIColorAccent",
-			Default  = Color3.fromRGB(17, 238, 253),
+			Default  = Color3.fromRGB(88, 182, 255),
 			Callback = function(color)
 				switchToCustom();
 				pcall(function() Compkiller:ChangeHighlightColor(color) end);
@@ -9384,7 +9384,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Background",
 			Flag     = "UIColorBackground",
-			Default  = Color3.fromRGB(22, 24, 29),
+			Default  = Color3.fromRGB(10, 12, 18),
 			Callback = function(color)
 				switchToCustom();
 				applyColor("BGDBColor", color);
@@ -9394,7 +9394,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Block BG",
 			Flag     = "UIColorBlockBG",
-			Default  = Color3.fromRGB(39, 40, 47),
+			Default  = Color3.fromRGB(22, 27, 42),
 			Callback = function(color)
 				switchToCustom();
 				applyColor("BlockBackground", color);
@@ -9404,7 +9404,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Block",
 			Flag     = "UIColorBlock",
-			Default  = Color3.fromRGB(28, 29, 34),
+			Default  = Color3.fromRGB(18, 21, 32),
 			Callback = function(color)
 				switchToCustom();
 				applyColor("BlockColor", color);
@@ -9414,7 +9414,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Dropdown",
 			Flag     = "UIColorDropdown",
-			Default  = Color3.fromRGB(33, 35, 39),
+			Default  = Color3.fromRGB(15, 18, 28),
 			Callback = function(color)
 				switchToCustom();
 				applyColor("DropColor", color);
@@ -9424,7 +9424,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Border",
 			Flag     = "UIColorBorder",
-			Default  = Color3.fromRGB(37, 38, 43),
+			Default  = Color3.fromRGB(42, 50, 74),
 			Callback = function(color)
 				switchToCustom();
 				applyColor("StrokeColor", color);
@@ -9434,7 +9434,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Highlight Border",
 			Flag     = "UIColorHighBorder",
-			Default  = Color3.fromRGB(55, 56, 63),
+			Default  = Color3.fromRGB(52, 63, 92),
 			Callback = function(color)
 				switchToCustom();
 				applyColor("HighStrokeColor", color);
@@ -9444,7 +9444,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Separator",
 			Flag     = "UIColorSeparator",
-			Default  = Color3.fromRGB(65, 65, 65),
+			Default  = Color3.fromRGB(38, 46, 68),
 			Callback = function(color)
 				switchToCustom();
 				applyColor("LineColor", color);
@@ -9454,7 +9454,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Text",
 			Flag     = "UIColorText",
-			Default  = Color3.fromRGB(255, 255, 255),
+			Default  = Color3.fromRGB(208, 218, 240),
 			Callback = function(color)
 				switchToCustom();
 				applyColor("SwitchColor", color);
