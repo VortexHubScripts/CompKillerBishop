@@ -62,6 +62,10 @@ export type ConfigFunctions = {
 			}
 		}	
 	},
+	ConfigExists: (self: ConfigFunctions , ConfigName: string) -> boolean,
+	RenameConfig: (self: ConfigFunctions , OldName: string , NewName: string) -> boolean,
+	DuplicateConfig: (self: ConfigFunctions , SourceName: string , NewName: string) -> boolean,
+	LoadConfigFromString: (self: ConfigFunctions , str: string) -> any?,
 };
 
 export type KeybindSettings = {
@@ -379,18 +383,18 @@ local Compkiller = {
 };
 
 Compkiller.Colors = {
-	Highlight = Color3.fromRGB(17, 238, 253),
-	Toggle = Color3.fromRGB(14, 203, 213),
-	Risky = Color3.fromRGB(251, 255, 39),
-	BGDBColor = Color3.fromRGB(22, 24, 29),
-	BlockColor = Color3.fromRGB(28, 29, 34),
-	StrokeColor = Color3.fromRGB(37, 38, 43),
-	SwitchColor = Color3.fromRGB(255, 255, 255),
-	DropColor = Color3.fromRGB(33, 35, 39),
-	MouseEnter = Color3.fromRGB(55, 58, 65),
-	BlockBackground = Color3.fromRGB(39, 40, 47),
-	LineColor = Color3.fromRGB(65, 65, 65),
-	HighStrokeColor = Color3.fromRGB(55, 56, 63),
+	Highlight       = Color3.fromRGB(32, 210, 245),   -- slightly softer cyan, less harsh
+	Toggle          = Color3.fromRGB(28, 185, 210),   -- matches softened highlight
+	Risky           = Color3.fromRGB(251, 255, 39),
+	BGDBColor       = Color3.fromRGB(16, 17, 22),     -- darker base for more depth
+	BlockColor      = Color3.fromRGB(23, 24, 30),     -- darker so elements pop against panels
+	StrokeColor     = Color3.fromRGB(50, 52, 62),     -- much more visible inner borders
+	SwitchColor     = Color3.fromRGB(225, 228, 240),  -- soft off-white, easier on eyes
+	DropColor       = Color3.fromRGB(30, 31, 38),     -- clearly distinct from BlockColor
+	MouseEnter      = Color3.fromRGB(58, 62, 74),     -- noticeable hover feedback
+	BlockBackground = Color3.fromRGB(38, 40, 50),     -- blue-tinted to contrast all layers
+	LineColor       = Color3.fromRGB(68, 70, 84),     -- clearly visible dividers
+	HighStrokeColor = Color3.fromRGB(62, 65, 78),     -- visible panel outlines
 };
 
 Compkiller.Elements = {
@@ -1553,139 +1557,28 @@ function Compkiller:GetCalculatePosition(planePos: number, planeNormal: number, 
 end;
 
 function Compkiller:_Blur(element : Frame , WindowRemote) : RBXScriptSignal
+	-- Optimized: lightweight BlurEffect instead of 3D Part + DepthOfField.
+	-- No polling thread, no CFrame tracking, no InputChanged loop.
 	if Compkiller.SecureMode and not Compkiller.SecurityConfig.BlurEnabled then
 		return game.Changed:Connect(function() end);
 	end;
 
-	local Part = Instance.new('Part',Compkiller.ArcylicParent);
-	local DepthOfField = Instance.new('DepthOfFieldEffect',cloneref(game:GetService('Lighting')));
-	local BlockMesh = Instance.new("BlockMesh");
-	local userSettings = UserSettings():GetService("UserGameSettings");
+	local Lighting = cloneref(game:GetService('Lighting'));
+	local BlurEffect = Instance.new('BlurEffect', Lighting);
+	BlurEffect.Size = WindowRemote:GetValue() and 10 or 0;
+	BlurEffect.Enabled = true;
+	BlurEffect.Name = Compkiller:_RandomString();
 
-	BlockMesh.Parent = Part;
-
-	Part.Material = Enum.Material.Glass;
-	Part.Transparency = 1;
-	Part.Reflectance = 1;
-	Part.CastShadow = false;
-	Part.Anchored = true;
-	Part.CanCollide = false;
-	Part.CanQuery = false;
-	Part.CollisionGroup = Compkiller:_RandomString();
-	Part.Size = Vector3.new(1, 1, 1) * 0.01;
-	Part.Color = Color3.fromRGB(0,0,0);
-
-	DepthOfField.Enabled = true;
-	DepthOfField.FarIntensity = 0;
-	DepthOfField.FocusDistance = 0;
-	DepthOfField.InFocusRadius = 1000;
-	DepthOfField.NearIntensity = 1;
-	DepthOfField.Name = Compkiller:_RandomString();
-
-	Part.Name = Compkiller:_RandomString();
-
-	local disconnect;
-
-	local UpdateFunction = function()
-		if Compkiller.SecureMode then
-			if Part then
-				Part:Destroy();
-				Part = nil;
-			end;
-
-			if DepthOfField then
-				DepthOfField:Destroy();
-				DepthOfField = nil;
-			end;
-
-			if BlockMesh then
-				BlockMesh:Destroy();
-				BlockMesh = nil;
-			end;
-
-			if disconnect then
-				disconnect();
-				disconnect = nil;
-			end;
-
-			return;
-		end;
-
-		local IsWindowActive = WindowRemote:GetValue();
-
-		if IsWindowActive then
-
-			Compkiller:_Animation(DepthOfField,TweenInfo.new(0.1),{
-				NearIntensity = 1
-			})
-
-			Compkiller:_Animation(Part,TweenInfo.new(0.1),{
-				Transparency = 0.97,
-				Size = Vector3.new(1, 1, 1) * 0.01;
-			})
-		else
-			Compkiller:_Animation(DepthOfField,TweenInfo.new(0.1),{
-				NearIntensity = 0
-			})
-
-			Compkiller:_Animation(Part,TweenInfo.new(0.1),{
-				Size = Vector3.zero,
-				Transparency = 1.5,
-			})
-
-			return false;
-		end;
-
-		if IsWindowActive then
-			local corner0 = element.AbsolutePosition;
-			local corner1 = corner0 + element.AbsoluteSize;
-
-			local ray0 = CurrentCamera.ScreenPointToRay(CurrentCamera,corner0.X, corner0.Y, 1);
-			local ray1 = CurrentCamera.ScreenPointToRay(CurrentCamera,corner1.X, corner1.Y, 1);
-
-			local planeOrigin = CurrentCamera.CFrame.Position + CurrentCamera.CFrame.LookVector * (0.05 - CurrentCamera.NearPlaneZ);
-
-			local planeNormal = CurrentCamera.CFrame.LookVector;
-
-			local pos0 = Compkiller:GetCalculatePosition(planeOrigin, planeNormal, ray0.Origin, ray0.Direction);
-			local pos1 = Compkiller:GetCalculatePosition(planeOrigin, planeNormal, ray1.Origin, ray1.Direction);
-
-			pos0 = CurrentCamera.CFrame:PointToObjectSpace(pos0);
-			pos1 = CurrentCamera.CFrame:PointToObjectSpace(pos1);
-
-			local size   = pos1 - pos0;
-			local center = (pos0 + pos1) / 2;
-
-			BlockMesh.Offset = center
-			BlockMesh.Scale  = size / 0.0101;
-			Part.CFrame = CurrentCamera.CFrame;
-		end;
-	end;
-
-	local rbxsignal = CurrentCamera:GetPropertyChangedSignal('CFrame'):Connect(UpdateFunction)
-	local loopThread = UserInputService.InputChanged:Connect(function(Input)
-		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.MouseMovement or Input.UserInputType == Enum.UserInputType.Touch then
-			pcall(UpdateFunction);
-		end;
+	local signal = WindowRemote:Connect(function(isActive)
+		Compkiller:_Animation(BlurEffect, TweenInfo.new(0.15), { Size = isActive and 10 or 0 });
 	end);
 
-	local THREAD = task.spawn(function()
-		while true do task.wait(0.1)
-			pcall(UpdateFunction);
-		end;
+	element.Destroying:Connect(function()
+		if signal then signal:Disconnect(); end;
+		if BlurEffect and BlurEffect.Parent then BlurEffect:Destroy(); end;
 	end);
 
-	disconnect = function()
-		rbxsignal:Disconnect();
-		loopThread:Disconnect();
-		task.cancel(THREAD);
-		Part:Destroy();
-		DepthOfField:Destroy();
-	end;
-
-	element.Destroying:Connect(disconnect);
-
-	return rbxsignal;
+	return signal;
 end;
 
 function Compkiller:_AddDragBlacklist(Frame: Frame)
@@ -3094,6 +2987,13 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		end;
 	end;
 
+	do
+		local _winSig = Compkiller.WindowSignals and Compkiller.WindowSignals[Window];
+		if _winSig then
+			_winSig:Connect(function(v) if not v then ToggleUI(false) end end);
+		end;
+	end;
+
 	Button.MouseButton1Click:Connect(function()
 		ToggleUI(true);
 	end)
@@ -3147,7 +3047,7 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 			end;
 
 			SPAWN_THREAD = task.spawn(function()
-				while true do task.wait(0.00001)
+				while true do task.wait()
 					if not Args.IsHold then
 						break;	
 					end;
@@ -3708,6 +3608,13 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 
 	ToggleUI(false);
 
+	do
+		local _winSig = Compkiller.WindowSignals and Compkiller.WindowSignals[Window];
+		if _winSig then
+			_winSig:Connect(function(v) if not v then ToggleUI(false) end end);
+		end;
+	end;
+
 	KB_Signal:Connect(ToggleUI);
 
 	local APIRef = {
@@ -3846,7 +3753,7 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 	end;
 
 	APIRef.Thread = task.spawn(function()
-		while true do task.wait(0.01)
+		while true do task.wait(0.25)
 			if APIRef.Mode ~= 1 then
 				if ElementAPI:GetValue() == APIRef.On then
 					KeybindFrame:SetVisible(true);
@@ -4160,7 +4067,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			Toggle.ChangeValue(Config.Default);
 
-			Config.Callback(Config.Default);
+			task.spawn(Config.Callback, Config.Default);
 		end;
 
 		function Args:GetValue()
@@ -4297,6 +4204,13 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 		ToggleUI(false);
 
+		do
+			local _winSig = Compkiller.WindowSignals and Compkiller.WindowSignals[Window];
+			if _winSig then
+				_winSig:Connect(function(v) if not v then ToggleUI(false) end end);
+			end;
+		end;
+
 		Element.MouseButton1Click:Connect(function()
 			ToggleUI(true);
 		end);
@@ -4307,7 +4221,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 					ToggleUI(false);
 				end;
 			end
-		end)		
+		end)
 
 		return Compkiller:_LoadElement(Elements , true , Signal)
 	end;
@@ -4367,6 +4281,14 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 
 	UICorner.CornerRadius = UDim.new(0, 6)
 	UICorner.Parent = DropdownWindow
+
+	local DropdownBlocker = Instance.new("TextButton")
+	DropdownBlocker.Size = UDim2.fromScale(1, 1)
+	DropdownBlocker.BackgroundTransparency = 1
+	DropdownBlocker.TextTransparency = 1
+	DropdownBlocker.ZIndex = BaseZ_Index + 1
+	DropdownBlocker.AutoButtonColor = false
+	DropdownBlocker.Parent = DropdownWindow
 
 	ScrollingFrame.Parent = DropdownWindow
 	ScrollingFrame.Active = true
@@ -4438,6 +4360,13 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	end;
 
 	ToggleUI(false)
+
+	do
+		local _winSig = Compkiller.WindowSignals and Compkiller.WindowSignals[Window];
+		if _winSig then
+			_winSig:Connect(function(v) if not v then ToggleUI(false) end end);
+		end;
+	end;
 
 	-- Fix: keep the dropdown pinned to BaseParent while the tab scrolls
 	do
@@ -4744,7 +4673,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			Block:SetTransparency((Config.Default and 0.1) or 0.3);
 
-			Config.Callback(Config.Default);
+			task.spawn(Config.Callback, Config.Default);
 		end;
 
 		Args.Signal = Signal:Connect(function(bool)
@@ -5238,7 +5167,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		Frame.BorderSizePixel = 0
 		Frame.Position = UDim2.new(1, 5, 0.5, 0)
 		Frame.Rotation = 45.000
-		Frame.Size = UDim2.new(1, 0, 1, 0)
+		Frame.Size = UDim2.new(1.3, 0, 1.3, 0)
 		Frame.SizeConstraint = Enum.SizeConstraint.RelativeYY
 		Frame.ZIndex = Zindex + 6
 
@@ -5250,8 +5179,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		UICorner_3.CornerRadius = UDim.new(3, 0)
 		UICorner_3.Parent = Frame
 
-		UIScale.Parent = Frame
-		UIScale.Scale = 1.300
+		UIScale:Destroy()
 
 		ValueText.Name = Compkiller:_RandomString()
 		ValueText.Parent = Slider
@@ -6334,7 +6262,7 @@ function Compkiller:SetTheme(name)
 			["SwitchColor"] = Color3.new(1, 1, 1),
 			["Toggle"] = Color3.new(0.835294, 0.054902, 0.248654)
 		}
-	elseif name == "Skeet" then		
+	elseif name == "Skeet" then
 		Compkiller.Colors = {
 			["BGDBColor"] = Color3.new(0.114578, 0.125191, 0.151724),
 			["BlockBackground"] = Color3.new(0.128181, 0.131124, 0.151724),
@@ -6348,6 +6276,21 @@ function Compkiller:SetTheme(name)
 			["StrokeColor"] = Color3.new(0.0769798, 0.0790924, 0.0896552),
 			["SwitchColor"] = Color3.new(1, 1, 1),
 			["Toggle"] = Color3.new(0, 0.324138, 0.10283)
+		}
+	elseif name == "Crimson Dark" then
+		Compkiller.Colors = {
+			["BGDBColor"] = Color3.fromRGB(10, 5, 5),
+			["BlockBackground"] = Color3.fromRGB(22, 8, 8),
+			["BlockColor"] = Color3.fromRGB(18, 6, 6),
+			["DropColor"] = Color3.fromRGB(28, 8, 8),
+			["HighStrokeColor"] = Color3.fromRGB(60, 12, 12),
+			["Highlight"] = Color3.fromRGB(200, 30, 30),
+			["LineColor"] = Color3.fromRGB(70, 15, 15),
+			["MouseEnter"] = Color3.fromRGB(90, 18, 18),
+			["Risky"] = Color3.fromRGB(255, 200, 30),
+			["StrokeColor"] = Color3.fromRGB(50, 10, 10),
+			["SwitchColor"] = Color3.fromRGB(255, 220, 220),
+			["Toggle"] = Color3.fromRGB(160, 20, 20),
 		}
 	end;
 
@@ -6516,6 +6459,9 @@ function Compkiller.new(Config : Window)
 
 	table.insert(Compkiller.Windows , CompKiller);
 
+	Compkiller.WindowSignals = Compkiller.WindowSignals or {};
+	Compkiller.WindowSignals[CompKiller] = WindowOpen;
+
 	MainFrame.Active = true;
 	MainFrame.Name = Compkiller:_RandomString()
 	MainFrame.Parent = CompKiller
@@ -6664,7 +6610,7 @@ function Compkiller.new(Config : Window)
 	UIListLayout.Padding = UDim.new(0, 4)
 
 	Userinfo.Name = Compkiller:_RandomString()
-	Userinfo.Parent = TabFrame
+	-- Userinfo.Parent = TabFrame -- commented out: hides account name and image
 	Userinfo.AnchorPoint = Vector2.new(0, 1)
 	Userinfo.BackgroundTransparency = 1.000
 	Userinfo.BorderColor3 = Color3.fromRGB(0, 0, 0)
@@ -7625,7 +7571,7 @@ function Compkiller.new(Config : Window)
 		UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(upd);
 
 		return task.defer(function()
-			while true do task.wait(1)
+			while true do task.wait(2)
 				upd();
 			end;
 		end)
@@ -7757,7 +7703,7 @@ function Compkiller.new(Config : Window)
 		local UIStroke_2 = Instance.new("UIStroke")
 		local Header_2 = Instance.new("Frame")
 		local SectionText_2 = Instance.new("TextLabel")
-		local SectionClose_2 = Instance.new("ImageButton")
+		local SectionClose_2 = Instance.new("ImageLabel")
 		local Frame = Instance.new("Frame")
 		local UIStroke_3 = Instance.new("UIStroke")
 		local UICorner_3 = Instance.new("UICorner")
@@ -7844,7 +7790,7 @@ function Compkiller.new(Config : Window)
 		SectionClose.Position = UDim2.new(1, -12, 0.5, 0)
 		SectionClose.Size = UDim2.new(0, 17, 0, 17)
 		SectionClose.ZIndex = 10
-		SectionClose.Image = Compkiller:CacheImage("rbxassetid://10723344270") -- download/import icon
+		SectionClose.Image = Compkiller:CacheImage("rbxassetid://109535175596957")
 		SectionClose.ImageTransparency = 0.500
 
 
@@ -8332,474 +8278,490 @@ function Compkiller.new(Config : Window)
 		function TabArgs:_DrawConfig()
 			local ConfigButton = {};
 
+			-- ==========================================================
+			-- Layout: 70px-tall row, split into three visual zones.
+			--   Top-right:    [ACTIVE] [AUTO] badges (y=6)
+			--   Middle-left:  config name + author (y=22 / y=40)
+			--   Middle-right: [Delete] [Save] [Load] buttons (y=26-46)
+			--   Bottom-left:  [Share] [Rename] [AutoToggle] icons (y=50-64)
+			-- All positions use absolute pixel offsets (no Y-scale), so
+			-- block height changes cascade cleanly.
+			-- ==========================================================
+
 			local ConfigBlock = Instance.new("Frame")
-			local ConfigText = Instance.new("TextLabel")
-			local LinkValues = Instance.new("Frame")
-			local UIListLayout = Instance.new("UIListLayout")
-			local SaveButton = Instance.new("Frame")
-			local Frame = Instance.new("Frame")
-			local UIStroke = Instance.new("UIStroke")
-			local UICorner = Instance.new("UICorner")
-			local TextLabel = Instance.new("TextLabel")
-			local Icon = Instance.new("ImageLabel")
-			local LoadButton = Instance.new("Frame")
-			local Frame_2 = Instance.new("Frame")
-			local UIStroke_2 = Instance.new("UIStroke")
-			local UICorner_2 = Instance.new("UICorner")
-			local TextLabel_2 = Instance.new("TextLabel")
-			local Icon_2 = Instance.new("ImageLabel")
-			local UIStroke_3 = Instance.new("UIStroke")
-			local UICorner_3 = Instance.new("UICorner")
-			local AuthorText = Instance.new("TextLabel")
-			local DelButton = Instance.new("ImageButton")
-			local ShareButton = Instance.new("ImageButton")
-			local UICorner = Instance.new("UICorner")
-			local UIGradient = Instance.new("UIGradient")
-
-			DelButton.Name = Compkiller:_RandomString()
-			DelButton.Parent = LinkValues
-			DelButton.BackgroundTransparency = 1.000
-			DelButton.BorderColor3 = Color3.fromRGB(0, 0, 0)
-			DelButton.BorderSizePixel = 0
-			DelButton.LayoutOrder = -9999
-			DelButton.Size = UDim2.new(0, 35, 0, 15)
-			DelButton.ZIndex = 14
-			DelButton.Image = Compkiller:CacheImage("rbxassetid://10747362393")
-			DelButton.ImageColor3 = Color3.fromRGB(255, 107, 107)
-			DelButton.ImageTransparency = 0.500
-			DelButton.ScaleType = Enum.ScaleType.Fit
-
-			UICorner.CornerRadius = UDim.new(1, 0)
-			UICorner.Parent = DelButton
-
-			-- Share button: copy config JSON to clipboard
-			ShareButton.Name = Compkiller:_RandomString()
-			ShareButton.Parent = LinkValues
-			ShareButton.BackgroundTransparency = 1.000
-			ShareButton.BorderColor3 = Color3.fromRGB(0, 0, 0)
-			ShareButton.BorderSizePixel = 0
-			ShareButton.LayoutOrder = -9998
-			ShareButton.Size = UDim2.new(0, 35, 0, 15)
-			ShareButton.ZIndex = 14
-			ShareButton.Image = Compkiller:CacheImage("rbxassetid://10734950899") -- share/upload icon
-			ShareButton.ImageColor3 = Compkiller.Colors.Highlight
-			ShareButton.ImageTransparency = 0.500
-			ShareButton.ScaleType = Enum.ScaleType.Fit
-
-			table.insert(Compkiller.Elements.Highlight, { Element = ShareButton, Property = "ImageColor3" });
 			ConfigBlock.Name = Compkiller:_RandomString()
 			ConfigBlock.Parent = ScrollingFrame
 			ConfigBlock.BackgroundColor3 = Color3.fromRGB(33, 34, 40)
 			ConfigBlock.BorderColor3 = Color3.fromRGB(0, 0, 0)
 			ConfigBlock.BorderSizePixel = 0
 			ConfigBlock.BackgroundTransparency = 1
-			ConfigBlock.Size = UDim2.new(1, -1, 0, 40)
+			ConfigBlock.Size = UDim2.new(1, -1, 0, 48)
 			ConfigBlock.ZIndex = 10
 
 			if Compkiller:_IsMobile() then
 				Compkiller:_AddDragBlacklist(ConfigBlock);
 			end;
 
+			local BlockCorner = Instance.new("UICorner")
+			BlockCorner.CornerRadius = UDim.new(0, 6)
+			BlockCorner.Parent = ConfigBlock
+
+			local BlockStroke = Instance.new("UIStroke")
+			BlockStroke.Transparency = 1
+			BlockStroke.Color = Compkiller.Colors.StrokeColor
+			BlockStroke.Parent = ConfigBlock
+			table.insert(Compkiller.Elements.StrokeColor , { Element = BlockStroke, Property = "Color" });
+
+			-- ======== Config name (left, vertically centered with Save/Load row) ========
+			local ConfigText = Instance.new("TextLabel")
 			ConfigText.Name = Compkiller:_RandomString()
 			ConfigText.Parent = ConfigBlock
-			ConfigText.AnchorPoint = Vector2.new(0, 0.5)
-			ConfigText.BackgroundTransparency = 1.000
-			ConfigText.BorderColor3 = Color3.fromRGB(0, 0, 0)
+			ConfigText.AnchorPoint = Vector2.new(0, 0)
+			ConfigText.BackgroundTransparency = 1
 			ConfigText.BorderSizePixel = 0
-			ConfigText.Position = UDim2.new(0, 12, 0.5, 15)
-			ConfigText.Size = UDim2.new(1, -20, 0, 25)
-			ConfigText.ZIndex = 10
+			ConfigText.Position = UDim2.new(0, 12, 0, 5)
+			ConfigText.Size = UDim2.new(0.55, 0, 0, 16)
+			ConfigText.ZIndex = 11
 			ConfigText.Font = Enum.Font.GothamMedium
-			ConfigText.RichText = true;
+			ConfigText.RichText = true
 			ConfigText.Text = "Config"
 			ConfigText.TextColor3 = Compkiller.Colors.SwitchColor
-			ConfigText.TextSize = 13.000
+			ConfigText.TextSize = 14
 			ConfigText.TextTransparency = 1
 			ConfigText.TextXAlignment = Enum.TextXAlignment.Left
+			ConfigText.TextYAlignment = Enum.TextYAlignment.Center
+			ConfigText.TextTruncate = Enum.TextTruncate.AtEnd
+			table.insert(Compkiller.Elements.SwitchColor , { Element = ConfigText, Property = 'TextColor3' });
 
-			table.insert(Compkiller.Elements.SwitchColor , {
-				Element = ConfigText,
-				Property = 'TextColor3'
-			});
+			local ConfigGradient = Instance.new("UIGradient")
+			ConfigGradient.Transparency = NumberSequence.new{NumberSequenceKeypoint.new(0.00, 0.00), NumberSequenceKeypoint.new(0.85, 0.00), NumberSequenceKeypoint.new(1.00, 1.00)}
+			ConfigGradient.Parent = ConfigText
 
-			UIGradient.Transparency = NumberSequence.new{NumberSequenceKeypoint.new(0.00, 0.00), NumberSequenceKeypoint.new(0.29, 0.00), NumberSequenceKeypoint.new(0.33, 1.00), NumberSequenceKeypoint.new(1.00, 1.00)}
-			UIGradient.Parent = ConfigText
+			-- Inline rename editor (hidden until user clicks the rename icon).
+			-- Positioned identically to ConfigText so the transition feels seamless.
+			local RenameBox = Instance.new("TextBox")
+			RenameBox.Name = Compkiller:_RandomString()
+			RenameBox.Parent = ConfigBlock
+			RenameBox.AnchorPoint = Vector2.new(0, 0)
+			RenameBox.BackgroundColor3 = Compkiller.Colors.BlockColor
+			RenameBox.BackgroundTransparency = 0.3
+			RenameBox.BorderSizePixel = 0
+			RenameBox.Position = UDim2.new(0, 10, 0, 3)
+			RenameBox.Size = UDim2.new(0.55, 0, 0, 20)
+			RenameBox.ZIndex = 15
+			RenameBox.Visible = false
+			RenameBox.ClearTextOnFocus = false
+			RenameBox.Font = Enum.Font.GothamMedium
+			RenameBox.PlaceholderText = "Type new name..."
+			RenameBox.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
+			RenameBox.Text = ""
+			RenameBox.TextColor3 = Compkiller.Colors.SwitchColor
+			RenameBox.TextSize = 13
+			RenameBox.TextXAlignment = Enum.TextXAlignment.Left
+			table.insert(Compkiller.Elements.SwitchColor , { Element = RenameBox, Property = 'TextColor3' });
+			table.insert(Compkiller.Elements.BlockColor , { Element = RenameBox, Property = 'BackgroundColor3' });
 
-			LinkValues.Name = Compkiller:_RandomString()
-			LinkValues.Parent = ConfigBlock
-			LinkValues.AnchorPoint = Vector2.new(1, 0.540000021)
-			LinkValues.BackgroundTransparency = 1.000
-			LinkValues.BorderColor3 = Color3.fromRGB(0, 0, 0)
-			LinkValues.BorderSizePixel = 0
-			LinkValues.Position = UDim2.new(1, -12, 0.5, 15)
-			LinkValues.Size = UDim2.new(1, 0, 0, 18)
-			LinkValues.ZIndex = 11
+			local RenameCorner = Instance.new("UICorner")
+			RenameCorner.CornerRadius = UDim.new(0, 4)
+			RenameCorner.Parent = RenameBox
 
-			UIListLayout.Parent = LinkValues
-			UIListLayout.FillDirection = Enum.FillDirection.Horizontal
-			UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
-			UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-			UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-			UIListLayout.Padding = UDim.new(0, -10)
+			local RenameStroke = Instance.new("UIStroke")
+			RenameStroke.Color = Compkiller.Colors.Highlight
+			RenameStroke.Thickness = 1
+			RenameStroke.Parent = RenameBox
+			table.insert(Compkiller.Elements.Highlight , { Element = RenameStroke, Property = 'Color' });
 
-			SaveButton.Name = Compkiller:_RandomString()
-			SaveButton.Parent = LinkValues
-			SaveButton.BackgroundTransparency = 1.000
-			SaveButton.BorderColor3 = Color3.fromRGB(0, 0, 0)
-			SaveButton.BorderSizePixel = 0
-			SaveButton.Size = UDim2.new(0, 77, 0, 30)
-			SaveButton.ZIndex = 14
+			local RenamePadding = Instance.new("UIPadding")
+			RenamePadding.PaddingLeft = UDim.new(0, 6)
+			RenamePadding.PaddingRight = UDim.new(0, 6)
+			RenamePadding.Parent = RenameBox
 
-			Frame.Parent = SaveButton
-			Frame.AnchorPoint = Vector2.new(0.5, 0.5)
-			Frame.BackgroundColor3 = Compkiller.Colors.Highlight
-			Frame.BackgroundTransparency = 1
-			Frame.BorderColor3 = Color3.fromRGB(0, 0, 0)
-			Frame.BorderSizePixel = 0
-			Frame.Position = UDim2.new(0.5, 0, 0.5, 0)
-			Frame.Size = UDim2.new(1, -15, 1, -5)
-			Frame.ZIndex = 14
+			-- ======== Top-right badges: ACTIVE (green), AUTO (blue) ========
+			local BadgeRow = Instance.new("Frame")
+			BadgeRow.Name = Compkiller:_RandomString()
+			BadgeRow.Parent = ConfigBlock
+			BadgeRow.AnchorPoint = Vector2.new(1, 0)
+			BadgeRow.BackgroundTransparency = 1
+			BadgeRow.BorderSizePixel = 0
+			BadgeRow.Position = UDim2.new(1, -10, 0, 5)
+			BadgeRow.Size = UDim2.new(0, 120, 0, 13)
+			BadgeRow.ZIndex = 12
 
-			table.insert(Compkiller.Elements.Highlight,{
-				Element = Frame,
-				Property = "BackgroundColor3"
-			});
+			local BadgeLayout = Instance.new("UIListLayout")
+			BadgeLayout.Parent = BadgeRow
+			BadgeLayout.FillDirection = Enum.FillDirection.Horizontal
+			BadgeLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+			BadgeLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+			BadgeLayout.SortOrder = Enum.SortOrder.LayoutOrder
+			BadgeLayout.Padding = UDim.new(0, 6)
 
-			UIStroke.Transparency = 1
-			UIStroke.Color = Compkiller.Colors.StrokeColor
-			UIStroke.Parent = Frame
+			local ActiveTag = Instance.new("TextLabel")
+			ActiveTag.Name = Compkiller:_RandomString()
+			ActiveTag.Parent = BadgeRow
+			ActiveTag.LayoutOrder = 1
+			ActiveTag.BackgroundTransparency = 1
+			ActiveTag.BorderSizePixel = 0
+			ActiveTag.Size = UDim2.new(0, 48, 0, 13)
+			ActiveTag.ZIndex = 12
+			ActiveTag.Font = Enum.Font.GothamBold
+			ActiveTag.Text = "● ACTIVE"
+			ActiveTag.TextColor3 = Color3.fromRGB(120, 220, 140)
+			ActiveTag.TextSize = 10
+			ActiveTag.TextTransparency = 1
+			ActiveTag.TextXAlignment = Enum.TextXAlignment.Right
+			ActiveTag.Visible = false
 
-			table.insert(Compkiller.Elements.StrokeColor,{
-				Element = UIStroke,
-				Property = "Color"
-			});
+			local AutoTag = Instance.new("TextLabel")
+			AutoTag.Name = Compkiller:_RandomString()
+			AutoTag.Parent = BadgeRow
+			AutoTag.LayoutOrder = 2
+			AutoTag.BackgroundTransparency = 1
+			AutoTag.BorderSizePixel = 0
+			AutoTag.Size = UDim2.new(0, 40, 0, 13)
+			AutoTag.ZIndex = 12
+			AutoTag.Font = Enum.Font.GothamBold
+			AutoTag.Text = "● AUTO"
+			AutoTag.TextColor3 = Color3.fromRGB(90, 180, 255)
+			AutoTag.TextSize = 10
+			AutoTag.TextTransparency = 1
+			AutoTag.TextXAlignment = Enum.TextXAlignment.Right
+			AutoTag.Visible = false
 
-			UICorner.CornerRadius = UDim.new(0, 3)
-			UICorner.Parent = Frame
+			-- ======== Middle-right: Delete | Save | Load ========
+			local TopButtons = Instance.new("Frame")
+			TopButtons.Name = Compkiller:_RandomString()
+			TopButtons.Parent = ConfigBlock
+			TopButtons.AnchorPoint = Vector2.new(1, 0)
+			TopButtons.BackgroundTransparency = 1
+			TopButtons.BorderSizePixel = 0
+			TopButtons.Position = UDim2.new(1, -10, 0, 24)
+			TopButtons.Size = UDim2.new(0, 180, 0, 20)
+			TopButtons.ZIndex = 12
 
-			TextLabel.Parent = Frame
-			TextLabel.AnchorPoint = Vector2.new(0.5, 0.5)
-			TextLabel.BackgroundTransparency = 1.000
-			TextLabel.BorderColor3 = Color3.fromRGB(0, 0, 0)
-			TextLabel.BorderSizePixel = 0
-			TextLabel.Position = UDim2.new(0.5, 27, 0.5, 0)
-			TextLabel.Size = UDim2.new(1, 0, 1, 0)
-			TextLabel.ZIndex = 14
-			TextLabel.Font = Enum.Font.GothamMedium
-			TextLabel.Text = "Save"
-			TextLabel.TextColor3 = Compkiller.Colors.SwitchColor
-			TextLabel.TextSize = 12.000
-			TextLabel.TextStrokeTransparency = 1
-			TextLabel.TextXAlignment = Enum.TextXAlignment.Left
-			TextLabel.TextTransparency = 1
+			local TopBtnLayout = Instance.new("UIListLayout")
+			TopBtnLayout.Parent = TopButtons
+			TopBtnLayout.FillDirection = Enum.FillDirection.Horizontal
+			TopBtnLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+			TopBtnLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+			TopBtnLayout.SortOrder = Enum.SortOrder.LayoutOrder
+			TopBtnLayout.Padding = UDim.new(0, 6)
 
-			table.insert(Compkiller.Elements.SwitchColor , {
-				Element = TextLabel,
-				Property = 'TextColor3'
-			});
+			-- Build a labeled button (Save/Load): highlighted pill w/ icon + text
+			local function _MakePillButton(order, text, iconId)
+				local btn = Instance.new("Frame")
+				btn.Name = Compkiller:_RandomString()
+				btn.Parent = TopButtons
+				btn.LayoutOrder = order
+				btn.BackgroundColor3 = Compkiller.Colors.Highlight
+				btn.BackgroundTransparency = 1
+				btn.BorderSizePixel = 0
+				btn.Size = UDim2.new(0, 60, 0, 20)
+				btn.ZIndex = 13
+				table.insert(Compkiller.Elements.Highlight , { Element = btn, Property = 'BackgroundColor3' });
 
-			Icon.Name = Compkiller:_RandomString()
-			Icon.Parent = Frame
-			Icon.AnchorPoint = Vector2.new(0, 0.5)
-			Icon.BackgroundTransparency = 1.000
-			Icon.BorderColor3 = Color3.fromRGB(0, 0, 0)
-			Icon.BorderSizePixel = 0
-			Icon.Position = UDim2.new(0, 5, 0.5, 0)
-			Icon.Size = UDim2.new(0.699999988, 0, 0.699999988, 0)
-			Icon.SizeConstraint = Enum.SizeConstraint.RelativeYY
-			Icon.ZIndex = 15
-			Icon.Image = Compkiller:CacheImage("rbxassetid://10734941499")
-			Icon.ImageTransparency = 1;
+				local corner = Instance.new("UICorner")
+				corner.CornerRadius = UDim.new(0, 4)
+				corner.Parent = btn
 
-			LoadButton.Name = Compkiller:_RandomString()
-			LoadButton.Parent = LinkValues
-			LoadButton.BackgroundTransparency = 1.000
-			LoadButton.BorderColor3 = Color3.fromRGB(0, 0, 0)
-			LoadButton.BorderSizePixel = 0
-			LoadButton.Size = UDim2.new(0, 77, 0, 30)
-			LoadButton.ZIndex = 14
+				local stroke = Instance.new("UIStroke")
+				stroke.Color = Compkiller.Colors.StrokeColor
+				stroke.Transparency = 1
+				stroke.Parent = btn
+				table.insert(Compkiller.Elements.StrokeColor , { Element = stroke, Property = 'Color' });
 
-			Frame_2.Parent = LoadButton
-			Frame_2.AnchorPoint = Vector2.new(0.5, 0.5)
-			Frame_2.BackgroundColor3 = Compkiller.Colors.Highlight
-			Frame_2.BackgroundTransparency = 1
-			Frame_2.BorderColor3 = Color3.fromRGB(0, 0, 0)
-			Frame_2.BorderSizePixel = 0
-			Frame_2.Position = UDim2.new(0.5, 0, 0.5, 0)
-			Frame_2.Size = UDim2.new(1, -15, 1, -5)
-			Frame_2.ZIndex = 14
+				local icon = Instance.new("ImageLabel")
+				icon.Name = Compkiller:_RandomString()
+				icon.Parent = btn
+				icon.AnchorPoint = Vector2.new(0, 0.5)
+				icon.BackgroundTransparency = 1
+				icon.Position = UDim2.new(0, 6, 0.5, 0)
+				icon.Size = UDim2.new(0, 12, 0, 12)
+				icon.ZIndex = 14
+				icon.Image = Compkiller:CacheImage(iconId)
+				icon.ImageColor3 = Compkiller.Colors.SwitchColor
+				icon.ImageTransparency = 1
+				table.insert(Compkiller.Elements.SwitchColor , { Element = icon, Property = 'ImageColor3' });
 
-			table.insert(Compkiller.Elements.Highlight,{
-				Element = Frame_2,
-				Property = "BackgroundColor3"
-			});
+				local lbl = Instance.new("TextLabel")
+				lbl.Name = Compkiller:_RandomString()
+				lbl.Parent = btn
+				lbl.AnchorPoint = Vector2.new(0, 0.5)
+				lbl.BackgroundTransparency = 1
+				lbl.Position = UDim2.new(0, 22, 0.5, 0)
+				lbl.Size = UDim2.new(1, -28, 1, 0)
+				lbl.ZIndex = 14
+				lbl.Font = Enum.Font.GothamMedium
+				lbl.Text = text
+				lbl.TextColor3 = Compkiller.Colors.SwitchColor
+				lbl.TextSize = 12
+				lbl.TextTransparency = 1
+				lbl.TextXAlignment = Enum.TextXAlignment.Left
+				table.insert(Compkiller.Elements.SwitchColor , { Element = lbl, Property = 'TextColor3' });
 
-			UIStroke_2.Transparency = 1
-			UIStroke_2.Color = Compkiller.Colors.StrokeColor
-			UIStroke_2.Parent = Frame_2
+				return btn, icon, lbl, stroke;
+			end;
 
-			table.insert(Compkiller.Elements.StrokeColor,{
-				Element = UIStroke_2,
-				Property = "Color"
-			});
+			-- Delete button (red trash icon, no text label — icon-only pill)
+			local DelButton = Instance.new("ImageButton")
+			DelButton.Name = Compkiller:_RandomString()
+			DelButton.Parent = TopButtons
+			DelButton.LayoutOrder = 1
+			DelButton.BackgroundTransparency = 1
+			DelButton.BorderSizePixel = 0
+			DelButton.Size = UDim2.new(0, 24, 0, 16)
+			DelButton.ZIndex = 13
+			DelButton.Image = Compkiller:CacheImage("rbxassetid://10747362393")
+			DelButton.ImageColor3 = Color3.fromRGB(255, 107, 107)
+			DelButton.ImageTransparency = 1
+			DelButton.ScaleType = Enum.ScaleType.Fit
 
-			UICorner_2.CornerRadius = UDim.new(0, 3)
-			UICorner_2.Parent = Frame_2
+			local SaveButton, SaveIcon, SaveLabel, SaveStroke = _MakePillButton(2, "Save", "rbxassetid://10734941499")
+			local LoadButton, LoadIcon, LoadLabel, LoadStroke = _MakePillButton(3, "Load", "rbxassetid://10723344270")
 
-			TextLabel_2.Parent = Frame_2
-			TextLabel_2.AnchorPoint = Vector2.new(0.5, 0.5)
-			TextLabel_2.BackgroundTransparency = 1.000
-			TextLabel_2.BorderColor3 = Color3.fromRGB(0, 0, 0)
-			TextLabel_2.BorderSizePixel = 0
-			TextLabel_2.Position = UDim2.new(0.5, 27, 0.5, 0)
-			TextLabel_2.Size = UDim2.new(1, 0, 1, 0)
-			TextLabel_2.ZIndex = 14
-			TextLabel_2.Font = Enum.Font.GothamMedium
-			TextLabel_2.Text = "Load"
-			TextLabel_2.TextColor3 = Compkiller.Colors.SwitchColor
-			TextLabel_2.TextSize = 12.000
-			TextLabel_2.TextStrokeTransparency = 1
-			TextLabel_2.TextXAlignment = Enum.TextXAlignment.Left
-			TextLabel_2.TextTransparency = 1
+			-- ======== Bottom-left: Share | Rename | AutoLoad icons ========
+			local BottomIcons = Instance.new("Frame")
+			BottomIcons.Name = Compkiller:_RandomString()
+			BottomIcons.Parent = ConfigBlock
+			BottomIcons.AnchorPoint = Vector2.new(0, 0)
+			BottomIcons.BackgroundTransparency = 1
+			BottomIcons.BorderSizePixel = 0
+			BottomIcons.Position = UDim2.new(0, 12, 0, 24)
+			BottomIcons.Size = UDim2.new(0, 100, 0, 20)
+			BottomIcons.ZIndex = 12
 
-			table.insert(Compkiller.Elements.SwitchColor , {
-				Element = TextLabel_2,
-				Property = 'TextColor3'
-			});
+			local BottomLayout = Instance.new("UIListLayout")
+			BottomLayout.Parent = BottomIcons
+			BottomLayout.FillDirection = Enum.FillDirection.Horizontal
+			BottomLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+			BottomLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+			BottomLayout.SortOrder = Enum.SortOrder.LayoutOrder
+			BottomLayout.Padding = UDim.new(0, 12)
 
-			Icon_2.Name = Compkiller:_RandomString()
-			Icon_2.Parent = Frame_2
-			Icon_2.AnchorPoint = Vector2.new(0, 0.5)
-			Icon_2.BackgroundTransparency = 1.000
-			Icon_2.BorderColor3 = Color3.fromRGB(0, 0, 0)
-			Icon_2.BorderSizePixel = 0
-			Icon_2.Position = UDim2.new(0, 5, 0.5, 0)
-			Icon_2.Size = UDim2.new(0.699999988, 0, 0.699999988, 0)
-			Icon_2.SizeConstraint = Enum.SizeConstraint.RelativeYY
-			Icon_2.ZIndex = 15
-			Icon_2.Image = Compkiller:CacheImage("rbxassetid://10723344270")
-			Icon_2.ImageTransparency = 1
-			UIStroke_3.Transparency = 1
+			local function _MakeBottomIcon(order, iconId, color)
+				local b = Instance.new("ImageButton")
+				b.Name = Compkiller:_RandomString()
+				b.Parent = BottomIcons
+				b.LayoutOrder = order
+				b.BackgroundTransparency = 1
+				b.BorderSizePixel = 0
+				b.Size = UDim2.new(0, 14, 0, 14)
+				b.ZIndex = 13
+				b.Image = Compkiller:CacheImage(iconId)
+				b.ImageColor3 = color or Compkiller.Colors.SwitchColor
+				b.ImageTransparency = 1
+				b.ScaleType = Enum.ScaleType.Fit
+				return b;
+			end;
 
-			UIStroke_3.Color = Compkiller.Colors.StrokeColor
-			UIStroke_3.Parent = ConfigBlock
+			-- Clipboard (Share) - lucide-clipboard
+			local ShareBtn = _MakeBottomIcon(1, "rbxassetid://10709799288")
+			table.insert(Compkiller.Elements.SwitchColor , { Element = ShareBtn, Property = 'ImageColor3' });
 
-			table.insert(Compkiller.Elements.StrokeColor,{
-				Element = UIStroke_3,
-				Property = "Color"
-			});
+			-- Rename (pencil) - lucide-pencil
+			local RenameBtn = _MakeBottomIcon(2, "rbxassetid://10734919691")
+			table.insert(Compkiller.Elements.SwitchColor , { Element = RenameBtn, Property = 'ImageColor3' });
 
-			UICorner_3.CornerRadius = UDim.new(0, 6)
-			UICorner_3.Parent = ConfigBlock
+			-- Auto-load toggle (star - lucide-star, blue when enabled to match AUTO badge)
+			local AutoBtn = _MakeBottomIcon(3, "rbxassetid://10734966248")
 
-			AuthorText.Name = Compkiller:_RandomString()
-			AuthorText.Parent = ConfigBlock
-			AuthorText.AnchorPoint = Vector2.new(0, 0.5)
-			AuthorText.BackgroundTransparency = 1.000
-			AuthorText.BorderColor3 = Color3.fromRGB(0, 0, 0)
-			AuthorText.BorderSizePixel = 0
-			AuthorText.Position = UDim2.new(0.5, -65, 0.5, 15)
-			AuthorText.Size = UDim2.new(1, -20, 0, 25)
-			AuthorText.ZIndex = 10
-			AuthorText.Font = Enum.Font.GothamMedium
-			AuthorText.RichText = true;
-			AuthorText.Text = "Author: <font color=\"rgb(17, 238, 253)\">NoFi</font>"
-			AuthorText.TextColor3 = Compkiller.Colors.SwitchColor
-			AuthorText.TextSize = 13.000
-			AuthorText.TextTransparency = 1
-			AuthorText.TextXAlignment = Enum.TextXAlignment.Left
+			-- ======== State & API ========
+			local _isActive = false
+			local _isAutoLoad = false
 
-			table.insert(Compkiller.Elements.SwitchColor , {
-				Element = TabNameLabel,
-				Property = 'TextColor3'
-			});
-
-			function ConfigButton:SetInfo(Author , ConfigName)
-				local R,G,B = tostring(math.floor(Compkiller.Colors.Highlight.R * 255)) , tostring(math.floor(Compkiller.Colors.Highlight.G * 255)) , tostring(math.floor(Compkiller.Colors.Highlight.B * 255));
-
-				AuthorText.Text = string.format("Author: <font color=\"rgb(%s, %s, %s)\">%s</font>" ,R,G,B , tostring(Author));
-				ConfigText.Text = ConfigName;
-
-				if ConfigBlock.BackgroundTransparency >= 0.7 then
-					ConfigButton:Update();
+			local function _RefreshAutoBtnVisual()
+				if _isAutoLoad then
+					AutoBtn.ImageColor3 = Color3.fromRGB(90, 180, 255) -- blue when enabled
+				else
+					AutoBtn.ImageColor3 = Compkiller.Colors.SwitchColor
 				end;
 			end;
 
-			function ConfigButton:Toggle(v)
-				if v then
-					Compkiller:_Animation(ConfigBlock,Tween,{
-						BackgroundTransparency = 0
-					});
+			function ConfigButton:SetInfo(Author, ConfigName, isAutoLoad, isActive)
+				-- Author parameter is accepted but unused (author display removed per design)
+				ConfigText.Text = ConfigName or "Config";
 
-					Compkiller:_Animation(LinkValues,Tween,{
-						Position = UDim2.new(1, -12, 0.5, 0)
-					});
+				_isAutoLoad = isAutoLoad and true or false;
+				_isActive = isActive and true or false;
 
-					Compkiller:_Animation(ConfigText,Tween,{
-						TextTransparency = 0.3,
-						Position = UDim2.new(0, 12, 0.5, 0)
-					});
+				AutoTag.Visible = _isAutoLoad;
+				ActiveTag.Visible = _isActive;
+				AutoTag.TextTransparency = _isAutoLoad and 0 or 1;
+				ActiveTag.TextTransparency = _isActive and 0 or 1;
 
-					Compkiller:_Animation(Frame,Tween,{
-						BackgroundTransparency = 0.100
-					});
-
-					Compkiller:_Animation(UIStroke,Tween,{
-						Transparency = 0
-					});
-
-					Compkiller:_Animation(AuthorText,Tween,{
-						TextTransparency = 0.5,
-						Position = UDim2.new(0,AuthorText:GetAttribute('SPC'), 0.5, 0)
-					});
-
-					Compkiller:_Animation(Icon_2,Tween,{
-						ImageTransparency = 0
-					});
-
-					Compkiller:_Animation(Icon,Tween,{
-						ImageTransparency = 0
-					});
-
-					Compkiller:_Animation(ShareButton,Tween,{
-						ImageTransparency = 0.2
-					});
-
-					Compkiller:_Animation(Frame_2,Tween,{
-						BackgroundTransparency = 0.100
-					});
-
-					Compkiller:_Animation(UIStroke_2,Tween,{
-						Transparency = 0
-					});
-
-					Compkiller:_Animation(TextLabel,Tween,{
-						TextStrokeTransparency = 0.900,
-						TextTransparency = 0
-					});
-
-					Compkiller:_Animation(TextLabel_2,Tween,{
-						TextStrokeTransparency = 0.900,
-						TextTransparency = 0
-					});
-				else
-					Compkiller:_Animation(AuthorText,Tween,{
-						TextTransparency = 1,
-						Position = UDim2.new(0.5, -65, 0.5, 15)
-					});
-
-					Compkiller:_Animation(Icon_2,Tween,{
-						ImageTransparency = 1
-					});
-
-					Compkiller:_Animation(Icon,Tween,{
-						ImageTransparency = 1
-					});
-
-					Compkiller:_Animation(ShareButton,Tween,{
-						ImageTransparency = 1
-					});
-
-					Compkiller:_Animation(LinkValues,Tween,{
-						Position = UDim2.new(1, -12, 0.5, 15)
-					});
-
-					Compkiller:_Animation(ConfigBlock,Tween,{
-						BackgroundTransparency = 1
-					});
-
-					Compkiller:_Animation(ConfigText,Tween,{
-						TextTransparency = 1,
-						Position = UDim2.new(0, 12, 0.5, 15)
-					});
-
-					Compkiller:_Animation(Frame,Tween,{
-						BackgroundTransparency = 1
-					});
-
-					Compkiller:_Animation(UIStroke,Tween,{
-						Transparency = 1
-					});
-
-					Compkiller:_Animation(Frame_2,Tween,{
-						BackgroundTransparency = 1
-					});
-
-					Compkiller:_Animation(UIStroke_2,Tween,{
-						Transparency = 1
-					});
-
-					Compkiller:_Animation(TextLabel,Tween,{
-						TextStrokeTransparency = 1,
-						TextTransparency = 1
-					});
-
-					Compkiller:_Animation(TextLabel_2,Tween,{
-						TextStrokeTransparency = 1,
-						TextTransparency = 1
-					});
-				end;
+				_RefreshAutoBtnVisual();
 			end;
 
 			function ConfigButton:Update()
-				local nameScale = TextService:GetTextSize(ConfigText.Text,ConfigText.TextSize,ConfigText.Font,Vector2.new(math.huge,math.huge));
-
-				AuthorText:SetAttribute('SPC',math.clamp(nameScale.X + 20 , 100,150));
-
-				AuthorText.Position = UDim2.new(0, AuthorText:GetAttribute('SPC'), 0.5, 15)
+				-- Kept for backward compatibility with the old API; the new layout
+				-- does its own sizing via anchors so there's nothing to compute.
 			end;
 
-			-- Auto-load badge (shown top-right of config row)
-			local AutoTag = Instance.new("TextLabel")
-			AutoTag.Parent = ConfigBlock
-			AutoTag.AnchorPoint = Vector2.new(1, 0)
-			AutoTag.BackgroundTransparency = 1
-			AutoTag.BorderSizePixel = 0
-			AutoTag.Position = UDim2.new(1, -10, 0, 4)
-			AutoTag.Size = UDim2.new(0, 60, 0, 14)
-			AutoTag.ZIndex = ConfigBlock.ZIndex + 2
-			AutoTag.Font = Enum.Font.GothamBold
-			AutoTag.Text = "AUTO"
-			AutoTag.TextColor3 = Compkiller.Colors.Highlight
-			AutoTag.TextSize = 9
-			AutoTag.TextTransparency = 1
-			AutoTag.TextXAlignment = Enum.TextXAlignment.Right
-			table.insert(Compkiller.Elements.Highlight, { Element = AutoTag, Property = "TextColor3" });
+			local Tween = TweenInfo.new(0.35, Enum.EasingStyle.Quint);
 
-			-- Wrap SetInfo to also handle auto-load badge visibility
-			function ConfigButton:SetInfo(Author, ConfigName, isAutoLoad)
-				local R,G,B = tostring(math.floor(Compkiller.Colors.Highlight.R * 255)) , tostring(math.floor(Compkiller.Colors.Highlight.G * 255)) , tostring(math.floor(Compkiller.Colors.Highlight.B * 255));
-				AuthorText.Text = string.format("Author: <font color=\"rgb(%s, %s, %s)\">%s</font>" ,R,G,B , tostring(Author));
-				ConfigText.Text = ConfigName;
-				AutoTag.TextTransparency = (isAutoLoad and 0.1) or 1;
+			function ConfigButton:Toggle(v)
+				if v then
+					Compkiller:_Animation(ConfigBlock, Tween, { BackgroundTransparency = 0 });
+					Compkiller:_Animation(BlockStroke, Tween, { Transparency = 0 });
+					Compkiller:_Animation(ConfigText, Tween, { TextTransparency = 0.1 });
 
-				if ConfigBlock.BackgroundTransparency >= 0.7 then
-					ConfigButton:Update();
+					-- Badges fade in only if enabled (Visible is gated separately)
+					if _isActive then
+						Compkiller:_Animation(ActiveTag, Tween, { TextTransparency = 0 });
+					end;
+					if _isAutoLoad then
+						Compkiller:_Animation(AutoTag, Tween, { TextTransparency = 0 });
+					end;
+
+					-- Top buttons
+					Compkiller:_Animation(DelButton, Tween, { ImageTransparency = 0.3 });
+					Compkiller:_Animation(SaveButton, Tween, { BackgroundTransparency = 0.1 });
+					Compkiller:_Animation(SaveStroke, Tween, { Transparency = 0 });
+					Compkiller:_Animation(SaveIcon, Tween, { ImageTransparency = 0 });
+					Compkiller:_Animation(SaveLabel, Tween, { TextTransparency = 0 });
+					Compkiller:_Animation(LoadButton, Tween, { BackgroundTransparency = 0.1 });
+					Compkiller:_Animation(LoadStroke, Tween, { Transparency = 0 });
+					Compkiller:_Animation(LoadIcon, Tween, { ImageTransparency = 0 });
+					Compkiller:_Animation(LoadLabel, Tween, { TextTransparency = 0 });
+
+					-- Bottom icons
+					Compkiller:_Animation(ShareBtn, Tween, { ImageTransparency = 0.35 });
+					Compkiller:_Animation(RenameBtn, Tween, { ImageTransparency = 0.35 });
+					Compkiller:_Animation(AutoBtn, Tween, { ImageTransparency = 0.2 });
+				else
+					Compkiller:_Animation(ConfigBlock, Tween, { BackgroundTransparency = 1 });
+					Compkiller:_Animation(BlockStroke, Tween, { Transparency = 1 });
+					Compkiller:_Animation(ConfigText, Tween, { TextTransparency = 1 });
+					Compkiller:_Animation(ActiveTag, Tween, { TextTransparency = 1 });
+					Compkiller:_Animation(AutoTag, Tween, { TextTransparency = 1 });
+
+					Compkiller:_Animation(DelButton, Tween, { ImageTransparency = 1 });
+					Compkiller:_Animation(SaveButton, Tween, { BackgroundTransparency = 1 });
+					Compkiller:_Animation(SaveStroke, Tween, { Transparency = 1 });
+					Compkiller:_Animation(SaveIcon, Tween, { ImageTransparency = 1 });
+					Compkiller:_Animation(SaveLabel, Tween, { TextTransparency = 1 });
+					Compkiller:_Animation(LoadButton, Tween, { BackgroundTransparency = 1 });
+					Compkiller:_Animation(LoadStroke, Tween, { Transparency = 1 });
+					Compkiller:_Animation(LoadIcon, Tween, { ImageTransparency = 1 });
+					Compkiller:_Animation(LoadLabel, Tween, { TextTransparency = 1 });
+
+					Compkiller:_Animation(ShareBtn, Tween, { ImageTransparency = 1 });
+					Compkiller:_Animation(RenameBtn, Tween, { ImageTransparency = 1 });
+					Compkiller:_Animation(AutoBtn, Tween, { ImageTransparency = 1 });
 				end;
 			end;
 
-			ConfigButton:Update();
-
+			-- ======== Click handlers ========
 			Compkiller:_Input(LoadButton, function()
-				task.spawn(ConfigButton.OnLoad);
+				task.spawn(function() if ConfigButton.OnLoad then ConfigButton.OnLoad(); end; end);
 			end);
 
 			Compkiller:_Input(SaveButton, function()
-				task.spawn(ConfigButton.OnSave);
+				task.spawn(function() if ConfigButton.OnSave then ConfigButton.OnSave(); end; end);
 			end);
 
+			-- Delete uses a DOUBLE-CLICK pattern (user-requested). Tracks last click
+			-- time; two clicks within 0.6s = confirmed delete.
+			local _lastDelClick = 0;
 			DelButton.MouseButton1Click:Connect(function()
-				task.spawn(ConfigButton.OnDelete);
+				local now = tick();
+				if now - _lastDelClick <= 0.6 then
+					_lastDelClick = 0;
+					task.spawn(function()
+						if ConfigButton.OnDelete then
+							ConfigButton.OnDelete(DelButton, true); -- true = confirmed
+						end;
+					end);
+				else
+					_lastDelClick = now;
+					-- Visual feedback that the first click was registered
+					DelButton.ImageTransparency = 0;
+					task.spawn(function()
+						if ConfigButton.OnDelete then
+							ConfigButton.OnDelete(DelButton, false); -- false = first click (notify only)
+						end;
+					end);
+					task.delay(0.6, function()
+						if _lastDelClick == now then
+							_lastDelClick = 0;
+							DelButton.ImageTransparency = 0.3;
+						end;
+					end);
+				end;
 			end);
 
-			-- Click share button = copy config JSON to clipboard
-			ShareButton.MouseButton1Click:Connect(function()
-				if ConfigButton.OnShare then task.spawn(ConfigButton.OnShare); end;
+			ShareBtn.MouseButton1Click:Connect(function()
+				task.spawn(function() if ConfigButton.OnShare then ConfigButton.OnShare(); end; end);
 			end);
 
-			-- Click config name = toggle auto-load
-			Compkiller:_Input(ConfigText, function()
-				if ConfigButton.OnAutoLoad then task.spawn(ConfigButton.OnAutoLoad); end;
+			-- Inline rename: click pencil, the config name becomes an editable field.
+			-- Enter submits with the new name. Click away or Escape cancels.
+			local _renameEscaped = false;
+
+			local function _StartRename()
+				RenameBox.Text = ConfigText.Text;
+				RenameBox.Visible = true;
+				ConfigText.TextTransparency = 1;
+				_renameEscaped = false;
+
+				-- Focus and put the cursor at the end. We intentionally do NOT select
+				-- all text here because that would render the text in the OS selection
+				-- highlight color (blue), which looks wrong. User can Ctrl+A if they
+				-- want to replace the whole name at once.
+				RenameBox:CaptureFocus();
+				task.defer(function()
+					pcall(function()
+						RenameBox.CursorPosition = #RenameBox.Text + 1;
+						RenameBox.SelectionStart = -1;
+					end);
+				end);
+			end;
+
+			local function _FinishRename(commit)
+				if not RenameBox.Visible then return; end;
+				local newName = RenameBox.Text;
+				RenameBox.Visible = false;
+				RenameBox.Text = "";
+				ConfigText.TextTransparency = 0.1;
+
+				if commit and ConfigButton.OnRename then
+					task.spawn(function() ConfigButton.OnRename(newName); end);
+				end;
+			end;
+
+			-- FocusLost fires with enterPressed=true on Enter, false on any other focus loss
+			RenameBox.FocusLost:Connect(function(enterPressed)
+				if _renameEscaped then
+					_FinishRename(false);
+				else
+					_FinishRename(enterPressed);
+				end;
+			end);
+
+			-- Escape handler: only listen while RenameBox is in focus, disconnect after.
+			local _escConn = nil;
+			RenameBox.Focused:Connect(function()
+				if _escConn then _escConn:Disconnect(); end;
+				_escConn = UserInputService.InputBegan:Connect(function(input)
+					if input.KeyCode == Enum.KeyCode.Escape then
+						_renameEscaped = true;
+						pcall(function() RenameBox:ReleaseFocus(false); end);
+					end;
+				end);
+			end);
+			RenameBox.FocusLost:Connect(function()
+				if _escConn then _escConn:Disconnect(); _escConn = nil; end;
+			end);
+
+			RenameBtn.MouseButton1Click:Connect(function()
+				if RenameBox.Visible then
+					_FinishRename(true);
+				else
+					_StartRename();
+				end;
+			end);
+
+			AutoBtn.MouseButton1Click:Connect(function()
+				task.spawn(function() if ConfigButton.OnAutoLoad then ConfigButton.OnAutoLoad(); end; end);
 			end);
 
 			ConfigButton.OnLoad = nil;
@@ -8807,6 +8769,8 @@ function Compkiller.new(Config : Window)
 			ConfigButton.OnDelete = nil;
 			ConfigButton.OnAutoLoad = nil;
 			ConfigButton.OnShare = nil;
+			ConfigButton.OnRename = nil;
+			ConfigButton.OnDuplicate = nil;
 
 			return ConfigButton;
 		end;
@@ -8815,58 +8779,214 @@ function Compkiller.new(Config : Window)
 			local __signals = {};
 			local Init = {};
 			local _autoLoadName = nil;
+			local _activeName = nil;    -- most recently loaded config this session
+			local _filterText = "";     -- search filter
 			local AutoLoadPath = Compkiller:_Path(Configuration.Config.Directory, "__autoload");
 
 			if isfile(AutoLoadPath) then
-				_autoLoadName = readfile(AutoLoadPath);
+				local ok, raw = pcall(readfile, AutoLoadPath);
+				if ok and raw and raw:byte() then
+					_autoLoadName = raw;
+				end;
+			end;
+
+			-- Sanitize a user-supplied config name: trim + strip filesystem-hostile chars
+			local function _SanitizeName(s)
+				if not s then return ""; end;
+				s = tostring(s);
+				-- trim leading/trailing whitespace
+				s = s:gsub("^%s+", ""):gsub("%s+$", "");
+				-- strip path separators and other bad chars
+				s = s:gsub("[/\\\"\'%c]", "");
+				-- never allow reserved name
+				if s == "__autoload" then s = ""; end;
+				return s;
+			end;
+
+			local function _Notify(content, duration)
+				WindowArgs.Notify.new({
+					Title = "Configs",
+					Icon = Compkiller:_GetIcon("folder"),
+					Content = content,
+					Duration = duration or 2
+				});
+			end;
+
+			-- Upgrade the "Add Config" section: use TextBox for Enter-to-submit, repurpose
+			-- the header-close icon to be an explicit IMPORT button with a visible label.
+			do
+				-- Give the import icon a recognizable clipboard-style hint next to it
+				local hint = Header:FindFirstChild("__ImportHint");
+				if not hint then
+					hint = Instance.new("TextLabel");
+					hint.Name = "__ImportHint";
+					hint.Parent = Header;
+					hint.AnchorPoint = Vector2.new(1, 0.5);
+					hint.BackgroundTransparency = 1;
+					hint.BorderSizePixel = 0;
+					hint.Position = UDim2.new(1, -34, 0.5, 0);
+					hint.Size = UDim2.new(0, 60, 0, 18);
+					hint.ZIndex = SectionClose.ZIndex;
+					hint.Font = Enum.Font.GothamMedium;
+					hint.Text = "Import";
+					hint.TextColor3 = Compkiller.Colors.SwitchColor;
+					hint.TextSize = 11;
+					hint.TextTransparency = 0.4;
+					hint.TextXAlignment = Enum.TextXAlignment.Right;
+					table.insert(Compkiller.Elements.SwitchColor , { Element = hint, Property = 'TextColor3' });
+				end;
+
+				-- Add a search box above the scrolling frame
+				if not ConfigList:FindFirstChild("__SearchFrame") then
+					local searchFrame = Instance.new("Frame");
+					searchFrame.Name = "__SearchFrame";
+					searchFrame.Parent = ConfigList;
+					searchFrame.AnchorPoint = Vector2.new(0.5, 0);
+					searchFrame.BackgroundColor3 = Compkiller.Colors.BlockColor;
+					searchFrame.BackgroundTransparency = 0.4;
+					searchFrame.BorderSizePixel = 0;
+					searchFrame.Position = UDim2.new(0.5, 0, 0, 35);
+					searchFrame.Size = UDim2.new(1, -20, 0, 22);
+					searchFrame.ZIndex = ScrollingFrame.ZIndex;
+					table.insert(Compkiller.Elements.BlockColor , { Element = searchFrame, Property = 'BackgroundColor3' });
+
+					local searchCorner = Instance.new("UICorner");
+					searchCorner.CornerRadius = UDim.new(0, 4);
+					searchCorner.Parent = searchFrame;
+
+					local searchStroke = Instance.new("UIStroke");
+					searchStroke.Color = Compkiller.Colors.StrokeColor;
+					searchStroke.Parent = searchFrame;
+					table.insert(Compkiller.Elements.StrokeColor , { Element = searchStroke, Property = 'Color' });
+
+					local searchIcon = Instance.new("ImageLabel");
+					searchIcon.Parent = searchFrame;
+					searchIcon.AnchorPoint = Vector2.new(0, 0.5);
+					searchIcon.BackgroundTransparency = 1;
+					searchIcon.Position = UDim2.new(0, 6, 0.5, 0);
+					searchIcon.Size = UDim2.new(0, 12, 0, 12);
+					searchIcon.ZIndex = searchFrame.ZIndex + 1;
+					searchIcon.Image = Compkiller:CacheImage("rbxassetid://10747373760");
+					searchIcon.ImageColor3 = Compkiller.Colors.SwitchColor;
+					searchIcon.ImageTransparency = 0.5;
+					table.insert(Compkiller.Elements.SwitchColor , { Element = searchIcon, Property = 'ImageColor3' });
+
+					local searchBox = Instance.new("TextBox");
+					searchBox.Name = "__SearchBox";
+					searchBox.Parent = searchFrame;
+					searchBox.AnchorPoint = Vector2.new(0, 0.5);
+					searchBox.BackgroundTransparency = 1;
+					searchBox.BorderSizePixel = 0;
+					searchBox.Position = UDim2.new(0, 24, 0.5, 0);
+					searchBox.Size = UDim2.new(1, -30, 1, -2);
+					searchBox.ZIndex = searchFrame.ZIndex + 1;
+					searchBox.ClearTextOnFocus = false;
+					searchBox.Font = Enum.Font.GothamMedium;
+					searchBox.PlaceholderColor3 = Color3.fromRGB(150, 150, 150);
+					searchBox.PlaceholderText = "Search configs...";
+					searchBox.Text = "";
+					searchBox.TextColor3 = Compkiller.Colors.SwitchColor;
+					searchBox.TextSize = 12;
+					searchBox.TextXAlignment = Enum.TextXAlignment.Left;
+					table.insert(Compkiller.Elements.SwitchColor , { Element = searchBox, Property = 'TextColor3' });
+
+					-- Shift the scrolling frame down to make room for the search bar
+					ScrollingFrame.Position = UDim2.new(0.5, 0, 0, 62);
+					ScrollingFrame.Size = UDim2.new(1, -10, 1, -72);
+
+					searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+						_filterText = string.lower(searchBox.Text);
+						if Init.Refresh then Init.Refresh(); end;
+					end);
+
+					Init._SearchBox = searchBox;
+				end;
 			end;
 
 			local Refresh;
 
-			Compkiller:_Input(Button,function()
-				if TextBox.Text:byte() then
-					local name = TextBox.Text;
+			local function _CreateConfig(rawName)
+				local name = _SanitizeName(rawName);
+				if name == "" then
+					_Notify("Config name cannot be empty", 2);
+					return false;
+				end;
+				if Configuration.Config:ConfigExists(name) then
+					_Notify("\"" .. name .. "\" already exists", 2);
+					return false;
+				end;
+				Configuration.Config:WriteConfig({ Name = name, Author = WindowArgs.Username });
+				_activeName = name;
+				_Notify("Created \"" .. name .. "\"", 2);
+				Refresh();
+				return true;
+			end;
+
+			Compkiller:_Input(Button, function()
+				local txt = TextBox.Text;
+				TextBox.Text = "";
+				_CreateConfig(txt);
+			end);
+
+			-- Enter in the name box also creates the config
+			TextBox.FocusLost:Connect(function(enterPressed)
+				if enterPressed and TextBox.Text:byte() then
+					local txt = TextBox.Text;
 					TextBox.Text = "";
-					Configuration.Config:WriteConfig({ Name = name, Author = WindowArgs.Username });
-					WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Created \"" .. name .. "\"", Duration = 2 });
-					Refresh();
+					_CreateConfig(txt);
 				end;
 			end);
 
-			-- Refresh config list manually
-			Compkiller:_Input(SectionClose_2, function()
-				Refresh();
-				WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Config list refreshed", Duration = 1.5 });
-			end);
-
-			-- Import from clipboard
+			-- Import from clipboard (explicit, labeled)
 			Compkiller:_Input(SectionClose, function()
 				local ok, raw = pcall(getclipboard);
+				if not (ok and raw and raw:byte()) then
+					_Notify("Clipboard is empty", 2);
+					return;
+				end;
+				local ok2, decoded = pcall(HttpService.JSONDecode, HttpService, raw);
+				if not (ok2 and decoded and decoded.__INFORMATION) then
+					_Notify("Clipboard is not a valid config", 2);
+					return;
+				end;
+
+				local importName = _SanitizeName(decoded.__INFORMATION.Name or "Imported");
+				if importName == "" then importName = "Imported"; end;
+
+				-- If a config with this name already exists, append a numeric suffix
+				local finalName = importName;
+				local suffix = 2;
+				while Configuration.Config:ConfigExists(finalName) do
+					finalName = importName .. "_" .. suffix;
+					suffix = suffix + 1;
+					if suffix > 99 then break; end;
+				end;
+
+				-- Update the embedded name to match the stored filename
+				decoded.__INFORMATION.Name = finalName;
+				local reEncoded;
+				local okEnc, enc = pcall(HttpService.JSONEncode, HttpService, decoded);
+				if okEnc then reEncoded = enc; else reEncoded = raw; end;
+
+				local _path = Compkiller:_Path(Configuration.Config.Directory, finalName);
+				local okWrite = pcall(writefile, _path, reEncoded);
+				if not okWrite then
+					_Notify("Failed to save imported config", 2);
+					return;
+				end;
+
+				_Notify("Imported \"" .. finalName .. "\"", 3);
+				Refresh();
+			end);
+
+			-- Also repurpose the second close icon on the "Add Config" section as a
+			-- quick "paste into name box" shortcut, since it's unused otherwise.
+			Compkiller:_Input(SectionClose_2, function()
+				local ok, raw = pcall(getclipboard);
 				if ok and raw and raw:byte() then
-					local ok2, decoded = pcall(HttpService.JSONDecode, HttpService, raw);
-					if ok2 and decoded and decoded.__INFORMATION then
-						local importName = decoded.__INFORMATION.Name or "Imported";
-						-- Apply the config values immediately
-						Configuration.Config:LoadConfigFromString(raw);
-						-- Also persist it to disk so it appears in the list
-						pcall(function()
-							local saveName = importName;
-							-- Avoid overwriting an existing config silently
-							local existing = Configuration.Config:GetConfigs();
-							local nameExists = false;
-							for _, n in next, existing do
-								if n == saveName then nameExists = true; break; end;
-							end;
-							if nameExists then
-								saveName = importName .. "_imported";
-							end;
-							Configuration.Config:WriteConfig({ Name = saveName, Author = decoded.__INFORMATION.Author or WindowArgs.Username });
-						end);
-						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Imported \"" .. importName .. "\" from clipboard", Duration = 3 });
-						Refresh();
-					else
-						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Clipboard is not a valid config", Duration = 2 });
-					end;
+					-- Only paste the first line, and sanitize
+					local firstLine = raw:match("[^\r\n]+") or "";
+					TextBox.Text = _SanitizeName(firstLine):sub(1, 64);
 				end;
 			end);
 
@@ -8880,58 +9000,209 @@ function Compkiller.new(Config : Window)
 				for i,v in next, __signals do v:Disconnect(); end;
 				__signals = {};
 
+				-- Sort: auto-load first, then active, then alphabetically
+				table.sort(FullConfig, function(a, b)
+					local aAuto = (a.Name == _autoLoadName) and 1 or 0;
+					local bAuto = (b.Name == _autoLoadName) and 1 or 0;
+					if aAuto ~= bAuto then return aAuto > bAuto; end;
+					local aAct = (a.Name == _activeName) and 1 or 0;
+					local bAct = (b.Name == _activeName) and 1 or 0;
+					if aAct ~= bAct then return aAct > bAct; end;
+					return string.lower(a.Name) < string.lower(b.Name);
+				end);
+
+				local shownCount = 0;
+
 				for i, v in next, FullConfig do
 					local cfgInfo = v.Info or {};
 					local cfgName = v.Name;
 
+					-- Hide the internal autoload marker file, and apply search filter
+					local _skip = false;
+					if cfgName == "__autoload" then _skip = true; end;
+					if (not _skip) and _filterText ~= "" and not string.find(string.lower(cfgName), _filterText, 1, true) then
+						_skip = true;
+					end;
+
+					if not _skip then
+
+					shownCount = shownCount + 1;
+
 					local Btn = TabArgs:_DrawConfig();
-					Btn:SetInfo(cfgInfo.Author or "Unknown", cfgName, _autoLoadName == cfgName);
+					Btn:SetInfo(
+						cfgInfo.Author or "Unknown",
+						cfgName,
+						_autoLoadName == cfgName,
+						_activeName == cfgName
+					);
 
 					table.insert(__signals, TabOpenSignal:Connect(function(open)
 						Btn:Toggle(open);
 					end));
 
+					-- Load
 					Btn.OnLoad = function()
-						Configuration.Config:LoadConfig(cfgName);
-						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Loaded \"" .. cfgName .. "\"", Duration = 2 });
+						local ok, err = pcall(function()
+							Configuration.Config:LoadConfig(cfgName);
+						end);
+						if ok then
+							_activeName = cfgName;
+							_Notify("Loaded \"" .. cfgName .. "\"", 2);
+							Refresh();
+						else
+							_Notify("Failed to load \"" .. cfgName .. "\"", 3);
+						end;
 					end;
 
+					-- Save (overwrite with current UI state)
 					Btn.OnSave = function()
-						Configuration.Config:WriteConfig({ Name = cfgName, Author = cfgInfo.Author or WindowArgs.Username });
-						Btn:SetInfo(cfgInfo.Author or WindowArgs.Username, cfgName, _autoLoadName == cfgName);
-						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Saved \"" .. cfgName .. "\"", Duration = 2 });
+						local ok = pcall(function()
+							Configuration.Config:WriteConfig({
+								Name = cfgName,
+								Author = cfgInfo.Author or WindowArgs.Username
+							});
+						end);
+						if ok then
+							_activeName = cfgName;
+							Btn:SetInfo(
+								cfgInfo.Author or WindowArgs.Username,
+								cfgName,
+								_autoLoadName == cfgName,
+								_activeName == cfgName
+							);
+							_Notify("Saved \"" .. cfgName .. "\"", 2);
+						else
+							_Notify("Failed to save \"" .. cfgName .. "\"", 3);
+						end;
 					end;
 
-					Btn.OnDelete = function()
+					-- Delete: button sends confirmed=false on first click, true on second (within 0.6s)
+					Btn.OnDelete = function(delBtnRef, confirmed)
+						if not confirmed then
+							_Notify("Double-click delete to confirm removing \"" .. cfgName .. "\"", 2);
+							return;
+						end;
+
 						Configuration.Config:DeleteConfig(cfgName);
 						if _autoLoadName == cfgName then
 							_autoLoadName = nil;
 							pcall(delfile, AutoLoadPath);
 						end;
-						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Deleted \"" .. cfgName .. "\"", Duration = 2 });
+						if _activeName == cfgName then
+							_activeName = nil;
+						end;
+						_Notify("Deleted \"" .. cfgName .. "\"", 2);
 						Refresh();
 					end;
 
+					-- Auto-load toggle
 					Btn.OnAutoLoad = function()
 						if _autoLoadName == cfgName then
 							_autoLoadName = nil;
 							pcall(delfile, AutoLoadPath);
-							WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Auto-load disabled", Duration = 2 });
+							_Notify("Auto-load disabled", 2);
 						else
 							_autoLoadName = cfgName;
 							pcall(writefile, AutoLoadPath, cfgName);
-							WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "\"" .. cfgName .. "\" will auto-load on start", Duration = 2 });
+							_Notify("\"" .. cfgName .. "\" will auto-load on start", 3);
 						end;
 						Refresh();
 					end;
 
+					-- Share: copy raw config JSON to clipboard
 					Btn.OnShare = function()
 						local _path = Compkiller:_Path(Configuration.Config.Directory, cfgName);
 						if isfile(_path) then
-							pcall(setclipboard, readfile(_path));
-							WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "\"" .. cfgName .. "\" copied to clipboard", Duration = 2 });
+							local ok, raw = pcall(readfile, _path);
+							if ok and raw then
+								local setOk = pcall(setclipboard, raw);
+								if setOk then
+									_Notify("\"" .. cfgName .. "\" copied to clipboard", 2);
+								else
+									_Notify("Clipboard unavailable on this executor", 3);
+								end;
+							else
+								_Notify("Could not read config file", 2);
+							end;
 						end;
 					end;
+
+					-- Rename: inline edit on the row sends the new name via parameter.
+					-- The rename icon toggles an inline TextBox on the row itself.
+					Btn.OnRename = function(proposed)
+						local newName = _SanitizeName(proposed or "");
+						if newName == "" or newName == cfgName then
+							-- Silent cancel — user either left it blank or unchanged
+							return;
+						end;
+						if Configuration.Config:ConfigExists(newName) then
+							_Notify("\"" .. newName .. "\" already exists", 2);
+							return;
+						end;
+						local ok = Configuration.Config:RenameConfig(cfgName, newName);
+						if ok then
+							if _autoLoadName == cfgName then
+								_autoLoadName = newName;
+								pcall(writefile, AutoLoadPath, newName);
+							end;
+							if _activeName == cfgName then
+								_activeName = newName;
+							end;
+							_Notify("Renamed to \"" .. newName .. "\"", 2);
+							Refresh();
+						else
+							_Notify("Rename failed", 2);
+						end;
+					end;
+
+					-- Duplicate: makes a copy called "<name>_copy" (auto-increment suffix)
+					Btn.OnDuplicate = function()
+						local base = cfgName .. "_copy";
+						local candidate = base;
+						local suffix = 2;
+						while Configuration.Config:ConfigExists(candidate) do
+							candidate = base .. suffix;
+							suffix = suffix + 1;
+							if suffix > 99 then
+								_Notify("Too many copies", 2);
+								return;
+							end;
+						end;
+						local ok = Configuration.Config:DuplicateConfig(cfgName, candidate);
+						if ok then
+							_Notify("Duplicated as \"" .. candidate .. "\"", 2);
+							Refresh();
+						else
+							_Notify("Duplicate failed", 2);
+						end;
+					end;
+
+					end; -- closes: if not _skip then
+				end;
+
+				-- Empty-state message when search turns up nothing
+				if shownCount == 0 then
+					local empty = Instance.new("Frame");
+					empty.Name = "__EmptyMsg";
+					empty.Parent = ScrollingFrame;
+					empty.BackgroundTransparency = 1;
+					empty.Size = UDim2.new(1, -10, 0, 40);
+					empty.ZIndex = ScrollingFrame.ZIndex + 1;
+
+					local lbl = Instance.new("TextLabel");
+					lbl.Parent = empty;
+					lbl.BackgroundTransparency = 1;
+					lbl.Size = UDim2.new(1, 0, 1, 0);
+					lbl.Font = Enum.Font.GothamMedium;
+					lbl.Text = (_filterText ~= "")
+						and ("No configs match \"" .. _filterText .. "\"")
+						or "No configs yet — type a name below and click Add Config";
+					lbl.TextColor3 = Compkiller.Colors.SwitchColor;
+					lbl.TextSize = 12;
+					lbl.TextTransparency = 0.4;
+					lbl.TextWrapped = true;
+					lbl.ZIndex = empty.ZIndex + 1;
+					table.insert(Compkiller.Elements.SwitchColor , { Element = lbl, Property = 'TextColor3' });
 				end;
 
 				ScrollingFrame.CanvasSize = UDim2.fromOffset(0, UIListLayout.AbsoluteContentSize.Y + 5);
@@ -8939,23 +9210,71 @@ function Compkiller.new(Config : Window)
 
 			Refresh();
 
-			-- Auto-load on startup
+			-- Auto-load on startup.
+			-- This used to fire on a fixed 0.5s delay. On large or async-built UIs the
+			-- consumer is often still creating tabs/toggles at that moment, so any flag
+			-- not yet registered in Compkiller.Flags is missing from the GetConfig("KV")
+			-- snapshot taken inside LoadConfig -- its saved value is never applied and its
+			-- Callback never fires. That's the "toggle looks ON but its runtime is dead,
+			-- needs a manual off->on" bug. We now wait until flag registration has settled
+			-- (no new flags for a short window) before loading, with a hard cap so a
+			-- partially-built UI can never hang startup.
 			if _autoLoadName then
-				task.delay(0.5, function()
+				task.spawn(function()
+					local function flagCount()
+						local n = 0;
+						for _ in next, Compkiller.Flags do n += 1; end;
+						return n;
+					end;
+
+					local STABLE_TARGET = 0.4;  -- settled once no new flag appears for this long
+					local MAX_WAIT      = 8;     -- absolute ceiling; never block startup forever
+
+					local last     = -1;
+					local stableFor = 0;
+					local elapsed   = 0;
+					while elapsed < MAX_WAIT do
+						local dt = task.wait();
+						elapsed += dt;
+						local c = flagCount();
+						if c > 0 and c == last then
+							stableFor += dt;
+							if stableFor >= STABLE_TARGET then break; end;
+						else
+							stableFor = 0;
+							last = c;
+						end;
+					end;
+
 					if isfile(Compkiller:_Path(Configuration.Config.Directory, _autoLoadName)) then
-						Configuration.Config:LoadConfig(_autoLoadName);
-						WindowArgs.Notify.new({ Title = "Configs", Icon = Compkiller:_GetIcon("folder"), Content = "Auto-loaded \"" .. _autoLoadName .. "\"", Duration = 3 });
+						local ok = pcall(function()
+							Configuration.Config:LoadConfig(_autoLoadName);
+						end);
+						if ok then
+							_activeName = _autoLoadName;
+							_Notify("Auto-loaded \"" .. _autoLoadName .. "\"", 3);
+							Refresh();
+						end;
+					else
+						-- Auto-load target was deleted externally; clear stale pointer.
+						_autoLoadName = nil;
+						pcall(delfile, AutoLoadPath);
 					end;
 				end);
 			end;
 
+			-- Safety poll for external changes (files created/deleted outside the UI).
+			-- Runs only every 2 seconds and only when the tab is visible, so it's cheap.
 			Init.THREAD = task.spawn(function()
 				local OldIndex = Configuration.Config:GetConfigCount();
-				while true do task.wait(0.5);
-					local CountInDirectory = Configuration.Config:GetConfigCount();
-					if OldIndex ~= CountInDirectory then
-						OldIndex = CountInDirectory;
-						Refresh();
+				while true do
+					task.wait(2);
+					if TabConfig.Visible then
+						local CountInDirectory = Configuration.Config:GetConfigCount();
+						if OldIndex ~= CountInDirectory then
+							OldIndex = CountInDirectory;
+							Refresh();
+						end;
 					end;
 				end;
 			end);
@@ -8967,6 +9286,228 @@ function Compkiller.new(Config : Window)
 
 		return TabArgs;
 	end;  -- closes WindowArgs:DrawConfig
+
+	-- ══════════════════════════════════════════════════════════════════
+	--  DrawUISettings  — portable UI Settings tab (ported from BloodlinesPVP)
+	--  Creates Appearance / Custom Colors / Controls sections as a real
+	--  window tab, complete with the switchToCustom() guard so async
+	--  config-load callbacks never corrupt the saved UITheme flag.
+	--
+	--  Usage (after all other tabs + DrawConfig:Init()):
+	--      local UISettings = Window:DrawUISettings({ Name = "UI Settings", Icon = "paintbrush" })
+	--      local ConfigUI   = Window:DrawConfig({ Name = "Config", Icon = "folder", Config = ConfigManager })
+	--      ConfigUI:Init()
+	--      UISettings:Init()          -- pass optional post-load callback
+	-- ══════════════════════════════════════════════════════════════════
+	function WindowArgs:DrawUISettings(Configuration)
+		Configuration = Compkiller.__CONFIG(Configuration, {
+			Name    = "UI Settings",
+			Icon    = "paintbrush",
+		});
+
+		-- Guards against async config-load callbacks corrupting UITheme.
+		local _uiInitTheme    = nil;   -- first theme fired during Init (= real saved value)
+		local _themeDropdown  = nil;   -- ref so post-load task can reset the label
+		local _uiReady        = false; -- gates switchToCustom() until Init() fires
+		local _configInitDone = false; -- gates SetValue("Custom") until 3s post-load
+
+		local UITab = WindowArgs:DrawTab({
+			Name            = Configuration.Name,
+			Icon            = Configuration.Icon,
+			Type            = "Single",
+			EnableScrolling = true,
+		});
+
+		-- ── Appearance ──────────────────────────────────────────────────
+		local AppearanceSection = UITab:DrawSection({
+			Name     = "Appearance",
+			Position = "left",
+		});
+
+		local themeDropdown;
+		themeDropdown = AppearanceSection:AddDropdown({
+			Name    = "Theme",
+			Flag    = "UITheme",
+			Default = "Default",
+			Values  = { "Default", "Dark Blue", "Dark Green", "Purple Rose", "Skeet", "Crimson Dark", "Custom" },
+			Callback = function(v)
+				-- Capture only the very first fired value (the real saved theme).
+				-- switchToCustom() re-triggers this; the nil-guard keeps _uiInitTheme accurate.
+				if _uiInitTheme == nil then _uiInitTheme = v end;
+				pcall(function() Compkiller:SetTheme(v) end);
+			end,
+		});
+		_themeDropdown = themeDropdown;
+
+		-- Called by every color picker callback; switches theme label to Custom
+		-- only once Init() has settled (avoids corrupting the saved UITheme flag
+		-- while LoadConfig async callbacks are still running).
+		local function switchToCustom()
+			if not _uiReady then return end;
+			pcall(function() Compkiller:SetTheme("Custom") end);
+			if _configInitDone then
+				pcall(function() themeDropdown:SetValue("Custom") end);
+			end;
+		end;
+
+		local function applyColor(key, color)
+			Compkiller.Colors[key] = color;
+			if Compkiller.Elements[key] then
+				for _, v in next, Compkiller.Elements[key] do
+					if v.Element and v.Property then
+						pcall(function() v.Element[v.Property] = color end);
+					end;
+				end;
+			end;
+		end;
+
+		-- ── Custom Colors ────────────────────────────────────────────────
+		local CustomColorsSection = UITab:DrawSection({
+			Name     = "Custom Colors",
+			Position = "left",
+		});
+
+		CustomColorsSection:AddColorPicker({
+			Name     = "Accent",
+			Flag     = "UIColorAccent",
+			Default  = Color3.fromRGB(17, 238, 253),
+			Callback = function(color)
+				switchToCustom();
+				pcall(function() Compkiller:ChangeHighlightColor(color) end);
+			end,
+		});
+
+		CustomColorsSection:AddColorPicker({
+			Name     = "Background",
+			Flag     = "UIColorBackground",
+			Default  = Color3.fromRGB(22, 24, 29),
+			Callback = function(color)
+				switchToCustom();
+				applyColor("BGDBColor", color);
+			end,
+		});
+
+		CustomColorsSection:AddColorPicker({
+			Name     = "Block BG",
+			Flag     = "UIColorBlockBG",
+			Default  = Color3.fromRGB(39, 40, 47),
+			Callback = function(color)
+				switchToCustom();
+				applyColor("BlockBackground", color);
+			end,
+		});
+
+		CustomColorsSection:AddColorPicker({
+			Name     = "Block",
+			Flag     = "UIColorBlock",
+			Default  = Color3.fromRGB(28, 29, 34),
+			Callback = function(color)
+				switchToCustom();
+				applyColor("BlockColor", color);
+			end,
+		});
+
+		CustomColorsSection:AddColorPicker({
+			Name     = "Dropdown",
+			Flag     = "UIColorDropdown",
+			Default  = Color3.fromRGB(33, 35, 39),
+			Callback = function(color)
+				switchToCustom();
+				applyColor("DropColor", color);
+			end,
+		});
+
+		CustomColorsSection:AddColorPicker({
+			Name     = "Border",
+			Flag     = "UIColorBorder",
+			Default  = Color3.fromRGB(37, 38, 43),
+			Callback = function(color)
+				switchToCustom();
+				applyColor("StrokeColor", color);
+			end,
+		});
+
+		CustomColorsSection:AddColorPicker({
+			Name     = "Highlight Border",
+			Flag     = "UIColorHighBorder",
+			Default  = Color3.fromRGB(55, 56, 63),
+			Callback = function(color)
+				switchToCustom();
+				applyColor("HighStrokeColor", color);
+			end,
+		});
+
+		CustomColorsSection:AddColorPicker({
+			Name     = "Separator",
+			Flag     = "UIColorSeparator",
+			Default  = Color3.fromRGB(65, 65, 65),
+			Callback = function(color)
+				switchToCustom();
+				applyColor("LineColor", color);
+			end,
+		});
+
+		CustomColorsSection:AddColorPicker({
+			Name     = "Text",
+			Flag     = "UIColorText",
+			Default  = Color3.fromRGB(255, 255, 255),
+			Callback = function(color)
+				switchToCustom();
+				applyColor("SwitchColor", color);
+			end,
+		});
+
+		-- ── Controls ─────────────────────────────────────────────────────
+		local ControlsSection = UITab:DrawSection({
+			Name     = "Controls",
+			Position = "left",
+		});
+
+		ControlsSection:AddKeybind({
+			Name     = "Toggle Menu",
+			Default  = "LeftAlt",
+			Flag     = "UIToggleKeybind",
+			Callback = function(key)
+				pcall(function() WindowArgs:SetMenuKey(key) end);
+			end,
+		});
+
+		-- ── Init object ───────────────────────────────────────────────────
+		-- Call UISettings:Init() right after ConfigUI:Init() so that:
+		--   1. _uiReady = true  → switchToCustom() now applies colors when the
+		--      user changes a color picker (but flag-write is still gated).
+		--   2. After 3 s the post-load task sets _configInitDone = true and
+		--      restores the real saved theme, undoing any "Custom" corruption
+		--      caused by async LoadConfig callbacks.
+		-- An optional OnPostLoad(readFlag) callback is fired in the same task
+		-- so callers can re-apply runtime state (e.g. re-enable Infinite M1).
+		local UISettingsInit = {};
+
+		function UISettingsInit:Init(OnPostLoad)
+			_uiReady = true;
+			task.spawn(function()
+				task.wait(3);
+				_configInitDone = true;
+
+				-- Restore the real saved theme.
+				pcall(function()
+					local savedTheme = _uiInitTheme;
+					if savedTheme and savedTheme ~= "Custom" then
+						Compkiller:SetTheme(savedTheme);
+						if _themeDropdown then
+							pcall(function() _themeDropdown:SetValue(savedTheme) end);
+						end;
+					end;
+				end);
+
+				if type(OnPostLoad) == "function" then
+					pcall(OnPostLoad);
+				end;
+			end);
+		end;
+
+		return UISettingsInit;
+	end;
 
 	function WindowArgs:DrawTab(TabConfig : TabConfig , Internal)
 		TabConfig = Compkiller.__CONFIG(TabConfig,{
@@ -9477,7 +10018,7 @@ function Compkiller.new(Config : Window)
 		TabArgs.LeftThread = coroutine.wrap(function()
 			task.wait();
 
-			while true do task.wait(0.01)
+			while true do task.wait(0.25)
 				TabArgs:_UpdateScrolling(Upvalue.Left , Upvalue.LeftLayout);
 			end;
 		end);
@@ -9485,7 +10026,7 @@ function Compkiller.new(Config : Window)
 		TabArgs.RightThread = coroutine.wrap(function()
 			task.wait(0.1);
 
-			while true do task.wait(0.01)
+			while true do task.wait(0.25)
 				TabArgs:_UpdateScrolling(Upvalue.Right , Upvalue.RightLayout);
 			end;
 		end);
@@ -10093,7 +10634,7 @@ function Compkiller.new(Config : Window)
 		end;
 
 		table.insert(WindowArgs.THREADS,task.spawn(function()
-			while true do task.wait(0.15)
+			while true do task.wait(0.5)
 				if Compkiller:_IsMobile() then
 					ToggleCloseUI(true);
 
@@ -10133,11 +10674,19 @@ function Compkiller.new(Config : Window)
 
 	-- DrawSettings: populates the built-in UserSettings panel (opened via avatar click)
 	function WindowArgs:DrawSettings()
+		-- Idempotent: if DrawSettings has already been called (either automatically
+		-- as part of Compkiller.new or manually by the user), return the previously
+		-- created ElementAPI so the caller can still add custom sections on top.
+		if WindowArgs._SettingsAPI then
+			return WindowArgs._SettingsAPI;
+		end;
+
 		if not WindowArgs.UserSettings.Create then
 			return;
 		end;
 
 		local ElementAPI = WindowArgs.UserSettings:Create();
+		WindowArgs._SettingsAPI = ElementAPI;
 
 		-- Section: Appearance --
 		local AppearanceSection = ElementAPI:DrawSection({
@@ -10158,10 +10707,11 @@ function Compkiller.new(Config : Window)
 		end;
 
 		-- Theme selector --
-		local ThemeNames = {"Default","Dark Blue","Dark Green","Purple Rose","Skeet","Custom"};
+		local ThemeNames = {"Default","Dark Blue","Dark Green","Purple Rose","Skeet","Crimson Dark","Custom"};
 
 		local ThemeDropdown = AppearanceSection:AddDropdown({
 			Name = "Theme",
+			Flag = "UI_Theme",
 			Default = "Default",
 			Values = ThemeNames,
 			Callback = function(value)
@@ -10203,6 +10753,7 @@ function Compkiller.new(Config : Window)
 
 			local picker = ColorSection:AddColorPicker({
 				Name = label,
+				Flag = "UI_Color_" .. key,
 				Default = Compkiller.Colors[key],
 				Callback = function(color)
 					if key == "Highlight" then
@@ -10338,7 +10889,7 @@ function Compkiller.new(Config : Window)
 			Property = "BackgroundColor3"
 		});
 
-		while true do task.wait(0.01);
+		while true do task.wait(0.25);
 			BlurElement.Size = UDim2.new(1, TabFrame.AbsoluteSize.X - 35, 1, 0);
 			MovementFrame.Size = UDim2.new(1, TabFrame.AbsoluteSize.X - 35, 1, 0);
 
@@ -10413,6 +10964,12 @@ function Compkiller.new(Config : Window)
 		end);
 	end);
 
+	-- Built-in UI Settings: auto-populates the settings panel with Appearance,
+	-- Custom Colors, Controls, and Performance sections. Script authors can
+	-- still call Window:DrawSettings() manually to get the ElementAPI for adding
+	-- their own sections — the call is idempotent.
+	pcall(function() WindowArgs:DrawSettings(); end);
+
 	return WindowArgs;
 end;
 
@@ -10436,7 +10993,10 @@ function Compkiller:GetConfig(Type: string)
 	local ConfigFlags = {};
 
 	for i,v in next , Compkiller.Flags do
-		local Value = v:GetValue();
+		-- Wrap GetValue in pcall so a broken flag can't corrupt the entire save
+		local ok, Value = pcall(function() return v:GetValue() end);
+		if not ok then continue end;
+
 		local Suf = {};
 
 		if typeof(Value) == "table" and Value.ColorPicker and typeof(Value.ColorPicker) == 'table' then
@@ -10449,9 +11009,17 @@ function Compkiller:GetConfig(Type: string)
 			Suf.Transparency = Value.ColorPicker.Transparency;
 
 			Suf.Type = "ColorPicker";
-		else
+		elseif typeof(Value) == "boolean" or typeof(Value) == "number" or typeof(Value) == "string" then
+			-- Only save JSON-safe primitives directly
 			Suf.Value = Value;
 			Suf.Type = "NormalElement";
+		elseif typeof(Value) == "table" then
+			-- Tables are fine for multi-select dropdowns etc.
+			Suf.Value = Value;
+			Suf.Type = "NormalElement";
+		else
+			-- Skip non-serializable types (Color3, Vector3, Instance, etc. stored raw)
+			continue;
 		end;
 
 		if Type == "KV" then
@@ -10521,6 +11089,18 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 			CreatedDate = Compkiller:GetDate()
 		};
 
+		local okEncode, encoded = pcall(HttpService.JSONEncode, HttpService, Flags);
+		if not okEncode then
+			warn("[CompKiller Config] Failed to encode config '"..Config.Name.."': "..tostring(encoded));
+			return false;
+		end;
+
+		local okWrite, writeErr = pcall(writefile, Compkiller:_Path(Args.Directory , Config.Name) , encoded);
+		if not okWrite then
+			warn("[CompKiller Config] Failed to write config '"..Config.Name.."': "..tostring(writeErr));
+			return false;
+		end;
+
 		if Args.EnableNotify then
 			notify.new({
 				Title = "Configs",
@@ -10529,7 +11109,7 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 			})
 		end
 
-		writefile(Compkiller:_Path(Args.Directory , Config.Name) , HttpService:JSONEncode(Flags));
+		return true;
 	end;
 
 	function Args:LoadConfigFromString(str: string)
@@ -10570,7 +11150,11 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 		if isfile(_path) then
 			local info = readfile(_path);
 
-			local decoded = HttpService:JSONDecode(info);
+			local ok, decoded = pcall(HttpService.JSONDecode, HttpService, info);
+
+			if not ok or type(decoded) ~= "table" then
+				return false;
+			end;
 
 			return decoded.__INFORMATION;
 		end;
@@ -10583,7 +11167,9 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 
 		for i,v in next , listfiles(Args.Directory) do
 			local Name = string.sub(v , #Args.Directory + 2);
-			if Name ~= "__autoload" then
+
+			-- Skip internal marker files that are not real configs
+			if Name ~= "__autoload" and Name ~= "" then
 				table.insert(names , Name);
 			end;
 		end;
@@ -10596,13 +11182,19 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 
 		for i,v in next , listfiles(Args.Directory) do
 			local Name = string.sub(v , #Args.Directory + 2);
-			if Name ~= "__autoload" then
+
+			-- Skip the autoload marker and any other non-config files
+			if Name ~= "__autoload" and Name ~= "" then
 				local Info = Args:ReadInfo(Name);
 
-				table.insert(names , {
-					Name = Name,
-					Info = Info,
-				});
+				-- ReadInfo returns false for unreadable / non-JSON files;
+				-- don't surface those as configs (they'd look broken in the UI)
+				if Info then
+					table.insert(names , {
+						Name = Name,
+						Info = Info,
+					});
+				end;
 			end;
 		end;
 
@@ -10627,13 +11219,63 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 
 	function Args:GetConfigCount()
 		local count = 0;
-		for _, v in next, listfiles(Args.Directory) do
-			local Name = string.sub(v, #Args.Directory + 2);
-			if Name ~= "__autoload" then
-				count += 1;
+		for i,v in next , listfiles(Args.Directory) do
+			local Name = string.sub(v , #Args.Directory + 2);
+			if Name ~= "__autoload" and Name ~= "" then
+				count = count + 1;
 			end;
 		end;
 		return count;
+	end;
+
+	function Args:ConfigExists(ConfigName: string)
+		return isfile(Compkiller:_Path(Args.Directory , ConfigName));
+	end;
+
+	function Args:RenameConfig(OldName: string , NewName: string)
+		if not OldName or not NewName or OldName == NewName then return false; end;
+
+		local _oldPath = Compkiller:_Path(Args.Directory , OldName);
+		local _newPath = Compkiller:_Path(Args.Directory , NewName);
+
+		if not isfile(_oldPath) then return false; end;
+		if isfile(_newPath) then return false; end; -- do not overwrite
+
+		local raw = readfile(_oldPath);
+
+		-- Update the embedded __INFORMATION.Name so it stays in sync with the filename
+		local ok, decoded = pcall(HttpService.JSONDecode , HttpService , raw);
+		if ok and decoded and decoded.__INFORMATION then
+			decoded.__INFORMATION.Name = NewName;
+			raw = HttpService:JSONEncode(decoded);
+		end;
+
+		writefile(_newPath , raw);
+		delfile(_oldPath);
+
+		return true;
+	end;
+
+	function Args:DuplicateConfig(SourceName: string , NewName: string)
+		if not SourceName or not NewName then return false; end;
+
+		local _srcPath = Compkiller:_Path(Args.Directory , SourceName);
+		local _newPath = Compkiller:_Path(Args.Directory , NewName);
+
+		if not isfile(_srcPath) then return false; end;
+		if isfile(_newPath) then return false; end;
+
+		local raw = readfile(_srcPath);
+
+		local ok, decoded = pcall(HttpService.JSONDecode , HttpService , raw);
+		if ok and decoded and decoded.__INFORMATION then
+			decoded.__INFORMATION.Name = NewName;
+			decoded.__INFORMATION.CreatedDate = Compkiller:GetDate();
+			raw = HttpService:JSONEncode(decoded);
+		end;
+
+		writefile(_newPath , raw);
+		return true;
 	end;
 
 	function Args:LoadConfig(ConfigName: string)
@@ -10642,7 +11284,11 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 		if isfile(_path) then
 			local info = readfile(_path);
 
-			local decoded = HttpService:JSONDecode(info);
+			local okDecode, decoded = pcall(HttpService.JSONDecode, HttpService, info);
+			if not okDecode or type(decoded) ~= "table" then
+				warn("[CompKiller Config] Failed to decode config '"..ConfigName.."': "..tostring(decoded));
+				return false;
+			end;
 
 			local Flags = Compkiller:GetConfig("KV");
 
@@ -10661,21 +11307,25 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 
 					if Value then
 
-						if v.Value.Type == "NormalElement" then
-							Value.Functions:SetValue(v.Value.Value);
+						pcall(function()
+							if v.Value.Type == "NormalElement" then
+								Value.Functions:SetValue(v.Value.Value);
 
-						elseif v.Value.Type == "ColorPicker" then
+							elseif v.Value.Type == "ColorPicker" then
 
-							local Color = Color3.new(v.Value.Color3.R,v.Value.Color3.G,v.Value.Color3.B);
+								local Color = Color3.new(v.Value.Color3.R,v.Value.Color3.G,v.Value.Color3.B);
 
-							local Transparency = v.Value.Transparency;
+								local Transparency = v.Value.Transparency;
 
-							Value.Functions:SetValue(Color , Transparency);
-						end;
+								Value.Functions:SetValue(Color , Transparency);
+							end;
+						end);
 
 						if Value.Functions.AutoKeybind then
 							if v.AutoKeybind then
-								Value.Functions.AutoKeybind:LoadSettings(v.AutoKeybind)
+								pcall(function()
+									Value.Functions.AutoKeybind:LoadSettings(v.AutoKeybind)
+								end);
 							end;
 						end;
 					end;
@@ -10807,16 +11457,17 @@ function Compkiller.newNotify()
 
 	NotifyContainer.Name = Compkiller:_RandomString()
 	NotifyContainer.Parent = Notification
-	NotifyContainer.AnchorPoint = Vector2.new(1, 0)
+	NotifyContainer.AnchorPoint = Vector2.new(1, 1)
 	NotifyContainer.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 	NotifyContainer.BackgroundTransparency = 1.000
 	NotifyContainer.BorderColor3 = Color3.fromRGB(0, 0, 0)
 	NotifyContainer.BorderSizePixel = 0
-	NotifyContainer.Position = UDim2.new(1, -10, 0, 1)
+	NotifyContainer.Position = UDim2.new(1, -10, 1, -10)
 	NotifyContainer.Size = UDim2.new(0, 100, 0, 100)
 
 	UIListLayout.Parent = NotifyContainer
 	UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
 	UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	UIListLayout.Padding = UDim.new(0, 3)
 
@@ -10831,7 +11482,7 @@ function Compkiller.newNotify()
 				Duration = 3,
 			});
 
-			LayoutREF -= 5;
+			LayoutREF += 5;
 
 			local BlockFrame = Instance.new("Frame")
 			local NotifyFrame = Instance.new("Frame")
