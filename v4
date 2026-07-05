@@ -7921,7 +7921,7 @@ function Compkiller.new(Config : Window)
 		TextBox.ClearTextOnFocus = false
 		TextBox.Font = Enum.Font.GothamMedium
 		TextBox.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
-		TextBox.PlaceholderText = "Config Name..."
+		TextBox.PlaceholderText = "Config name — or paste a config code..."
 		TextBox.Text = ""
 		TextBox.TextColor3 = Compkiller.Colors.SwitchColor
 		TextBox.TextSize = 12.000
@@ -8279,11 +8279,12 @@ function Compkiller.new(Config : Window)
 			local ConfigButton = {};
 
 			-- ==========================================================
-			-- Layout: 70px-tall row, split into three visual zones.
-			--   Top-right:    [ACTIVE] [AUTO] badges (y=6)
-			--   Middle-left:  config name + author (y=22 / y=40)
-			--   Middle-right: [Delete] [Save] [Load] buttons (y=26-46)
-			--   Bottom-left:  [Share] [Rename] [AutoToggle] icons (y=50-64)
+			-- Layout: 48px-tall row, split into visual zones.
+			--   Left edge:    accent strip (green = active, blue = auto)
+			--   Top-left:     config name + "by author · date" subtitle
+			--   Top-right:    [ACTIVE] [AUTO] badges
+			--   Bottom-right: [Delete] [Save] [Load] buttons
+			--   Bottom-left:  [Export] [Duplicate] [Rename] [AutoToggle] icons
 			-- All positions use absolute pixel offsets (no Y-scale), so
 			-- block height changes cascade cleanly.
 			-- ==========================================================
@@ -8311,6 +8312,23 @@ function Compkiller.new(Config : Window)
 			BlockStroke.Color = Compkiller.Colors.StrokeColor
 			BlockStroke.Parent = ConfigBlock
 			table.insert(Compkiller.Elements.StrokeColor , { Element = BlockStroke, Property = "Color" });
+
+			-- Left accent strip: green when this config is ACTIVE, blue when AUTO-load.
+			local AccentBar = Instance.new("Frame")
+			AccentBar.Name = Compkiller:_RandomString()
+			AccentBar.Parent = ConfigBlock
+			AccentBar.AnchorPoint = Vector2.new(0, 0.5)
+			AccentBar.BackgroundColor3 = Color3.fromRGB(120, 220, 140)
+			AccentBar.BackgroundTransparency = 1
+			AccentBar.BorderSizePixel = 0
+			AccentBar.Position = UDim2.new(0, 3, 0.5, 0)
+			AccentBar.Size = UDim2.new(0, 3, 1, -14)
+			AccentBar.ZIndex = 11
+			AccentBar.Visible = false
+
+			local AccentCorner = Instance.new("UICorner")
+			AccentCorner.CornerRadius = UDim.new(1, 0)
+			AccentCorner.Parent = AccentBar
 
 			-- ======== Config name (left, vertically centered with Save/Load row) ========
 			local ConfigText = Instance.new("TextLabel")
@@ -8553,20 +8571,25 @@ function Compkiller.new(Config : Window)
 				return b;
 			end;
 
-			-- Clipboard (Share) - lucide-clipboard
+			-- Clipboard (Export/Share) - lucide-clipboard
 			local ShareBtn = _MakeBottomIcon(1, "rbxassetid://10709799288")
 			table.insert(Compkiller.Elements.SwitchColor , { Element = ShareBtn, Property = 'ImageColor3' });
 
+			-- Duplicate - lucide-copy
+			local DupBtn = _MakeBottomIcon(2, "rbxassetid://10709812159")
+			table.insert(Compkiller.Elements.SwitchColor , { Element = DupBtn, Property = 'ImageColor3' });
+
 			-- Rename (pencil) - lucide-pencil
-			local RenameBtn = _MakeBottomIcon(2, "rbxassetid://10734919691")
+			local RenameBtn = _MakeBottomIcon(3, "rbxassetid://10734919691")
 			table.insert(Compkiller.Elements.SwitchColor , { Element = RenameBtn, Property = 'ImageColor3' });
 
 			-- Auto-load toggle (star - lucide-star, blue when enabled to match AUTO badge)
-			local AutoBtn = _MakeBottomIcon(3, "rbxassetid://10734966248")
+			local AutoBtn = _MakeBottomIcon(4, "rbxassetid://10734966248")
 
 			-- ======== State & API ========
 			local _isActive = false
 			local _isAutoLoad = false
+			local _plainName = "Config" -- unformatted name (RenameBox must not see rich text)
 
 			local function _RefreshAutoBtnVisual()
 				if _isAutoLoad then
@@ -8576,9 +8599,28 @@ function Compkiller.new(Config : Window)
 				end;
 			end;
 
-			function ConfigButton:SetInfo(Author, ConfigName, isAutoLoad, isActive)
-				-- Author parameter is accepted but unused (author display removed per design)
-				ConfigText.Text = ConfigName or "Config";
+			-- Escape user text for RichText (config names/authors may contain <, >, &)
+			local function _EscRich(s)
+				return tostring(s):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;");
+			end;
+
+			function ConfigButton:SetInfo(Author, ConfigName, isAutoLoad, isActive, CreatedDate)
+				_plainName = ConfigName or "Config";
+
+				local meta = {};
+				if Author and Author ~= "" and Author ~= "Unknown" then
+					table.insert(meta, "by " .. _EscRich(Author));
+				end;
+				if CreatedDate and CreatedDate ~= "" then
+					table.insert(meta, _EscRich(CreatedDate));
+				end;
+
+				if #meta > 0 then
+					ConfigText.Text = _EscRich(_plainName)
+						.. '  <font color="#9aa0ad" size="11">' .. table.concat(meta, " · ") .. '</font>';
+				else
+					ConfigText.Text = _EscRich(_plainName);
+				end;
 
 				_isAutoLoad = isAutoLoad and true or false;
 				_isActive = isActive and true or false;
@@ -8587,6 +8629,13 @@ function Compkiller.new(Config : Window)
 				ActiveTag.Visible = _isActive;
 				AutoTag.TextTransparency = _isAutoLoad and 0 or 1;
 				ActiveTag.TextTransparency = _isActive and 0 or 1;
+
+				-- Accent strip: active (green) takes priority over auto-load (blue)
+				AccentBar.Visible = _isActive or _isAutoLoad;
+				AccentBar.BackgroundColor3 = _isActive
+					and Color3.fromRGB(120, 220, 140)
+					or Color3.fromRGB(90, 180, 255);
+				AccentBar.BackgroundTransparency = AccentBar.Visible and 0 or 1;
 
 				_RefreshAutoBtnVisual();
 			end;
@@ -8611,6 +8660,9 @@ function Compkiller.new(Config : Window)
 					if _isAutoLoad then
 						Compkiller:_Animation(AutoTag, Tween, { TextTransparency = 0 });
 					end;
+					if AccentBar.Visible then
+						Compkiller:_Animation(AccentBar, Tween, { BackgroundTransparency = 0 });
+					end;
 
 					-- Top buttons
 					Compkiller:_Animation(DelButton, Tween, { ImageTransparency = 0.3 });
@@ -8625,6 +8677,7 @@ function Compkiller.new(Config : Window)
 
 					-- Bottom icons
 					Compkiller:_Animation(ShareBtn, Tween, { ImageTransparency = 0.35 });
+					Compkiller:_Animation(DupBtn, Tween, { ImageTransparency = 0.35 });
 					Compkiller:_Animation(RenameBtn, Tween, { ImageTransparency = 0.35 });
 					Compkiller:_Animation(AutoBtn, Tween, { ImageTransparency = 0.2 });
 				else
@@ -8633,6 +8686,7 @@ function Compkiller.new(Config : Window)
 					Compkiller:_Animation(ConfigText, Tween, { TextTransparency = 1 });
 					Compkiller:_Animation(ActiveTag, Tween, { TextTransparency = 1 });
 					Compkiller:_Animation(AutoTag, Tween, { TextTransparency = 1 });
+					Compkiller:_Animation(AccentBar, Tween, { BackgroundTransparency = 1 });
 
 					Compkiller:_Animation(DelButton, Tween, { ImageTransparency = 1 });
 					Compkiller:_Animation(SaveButton, Tween, { BackgroundTransparency = 1 });
@@ -8645,10 +8699,18 @@ function Compkiller.new(Config : Window)
 					Compkiller:_Animation(LoadLabel, Tween, { TextTransparency = 1 });
 
 					Compkiller:_Animation(ShareBtn, Tween, { ImageTransparency = 1 });
+					Compkiller:_Animation(DupBtn, Tween, { ImageTransparency = 1 });
 					Compkiller:_Animation(RenameBtn, Tween, { ImageTransparency = 1 });
 					Compkiller:_Animation(AutoBtn, Tween, { ImageTransparency = 1 });
 				end;
 			end;
+
+			-- Subtle hover feedback across the whole row
+			Compkiller:_Hover(ConfigBlock, function()
+				Compkiller:_Animation(ConfigBlock, Tween, { BackgroundColor3 = Color3.fromRGB(41, 43, 51) });
+			end, function()
+				Compkiller:_Animation(ConfigBlock, Tween, { BackgroundColor3 = Color3.fromRGB(33, 34, 40) });
+			end);
 
 			-- ======== Click handlers ========
 			Compkiller:_Input(LoadButton, function()
@@ -8698,7 +8760,7 @@ function Compkiller.new(Config : Window)
 			local _renameEscaped = false;
 
 			local function _StartRename()
-				RenameBox.Text = ConfigText.Text;
+				RenameBox.Text = _plainName;
 				RenameBox.Visible = true;
 				ConfigText.TextTransparency = 1;
 				_renameEscaped = false;
@@ -8764,6 +8826,10 @@ function Compkiller.new(Config : Window)
 				task.spawn(function() if ConfigButton.OnAutoLoad then ConfigButton.OnAutoLoad(); end; end);
 			end);
 
+			DupBtn.MouseButton1Click:Connect(function()
+				task.spawn(function() if ConfigButton.OnDuplicate then ConfigButton.OnDuplicate(); end; end);
+			end);
+
 			ConfigButton.OnLoad = nil;
 			ConfigButton.OnSave = nil;
 			ConfigButton.OnDelete = nil;
@@ -8812,28 +8878,67 @@ function Compkiller.new(Config : Window)
 				});
 			end;
 
-			-- Upgrade the "Add Config" section: use TextBox for Enter-to-submit, repurpose
-			-- the header-close icon to be an explicit IMPORT button with a visible label.
+			-- Upgrade the "Add Config" section: TextBox supports Enter-to-submit and
+			-- doubles as a paste target for config codes. The old repurposed header
+			-- close-icons are hidden in favor of a proper labeled Import button.
+			local ImportBtn;
 			do
-				-- Give the import icon a recognizable clipboard-style hint next to it
-				local hint = Header:FindFirstChild("__ImportHint");
-				if not hint then
-					hint = Instance.new("TextLabel");
-					hint.Name = "__ImportHint";
-					hint.Parent = Header;
-					hint.AnchorPoint = Vector2.new(1, 0.5);
-					hint.BackgroundTransparency = 1;
-					hint.BorderSizePixel = 0;
-					hint.Position = UDim2.new(1, -34, 0.5, 0);
-					hint.Size = UDim2.new(0, 60, 0, 18);
-					hint.ZIndex = SectionClose.ZIndex;
-					hint.Font = Enum.Font.GothamMedium;
-					hint.Text = "Import";
-					hint.TextColor3 = Compkiller.Colors.SwitchColor;
-					hint.TextSize = 11;
-					hint.TextTransparency = 0.4;
-					hint.TextXAlignment = Enum.TextXAlignment.Right;
-					table.insert(Compkiller.Elements.SwitchColor , { Element = hint, Property = 'TextColor3' });
+				SectionClose.Visible = false;
+				SectionClose_2.Visible = false;
+
+				ImportBtn = Header:FindFirstChild("__ImportBtn");
+				if not ImportBtn then
+					ImportBtn = Instance.new("Frame");
+					ImportBtn.Name = "__ImportBtn";
+					ImportBtn.Parent = Header;
+					ImportBtn.AnchorPoint = Vector2.new(1, 0.5);
+					ImportBtn.BackgroundColor3 = Compkiller.Colors.Highlight;
+					ImportBtn.BackgroundTransparency = 0.1;
+					ImportBtn.BorderSizePixel = 0;
+					ImportBtn.Position = UDim2.new(1, -10, 0.5, 0);
+					ImportBtn.Size = UDim2.new(0, 72, 0, 20);
+					ImportBtn.ZIndex = 10;
+					table.insert(Compkiller.Elements.Highlight , { Element = ImportBtn, Property = 'BackgroundColor3' });
+
+					local impCorner = Instance.new("UICorner");
+					impCorner.CornerRadius = UDim.new(0, 4);
+					impCorner.Parent = ImportBtn;
+
+					local impStroke = Instance.new("UIStroke");
+					impStroke.Color = Compkiller.Colors.StrokeColor;
+					impStroke.Parent = ImportBtn;
+					table.insert(Compkiller.Elements.StrokeColor , { Element = impStroke, Property = 'Color' });
+
+					local impIcon = Instance.new("ImageLabel");
+					impIcon.Parent = ImportBtn;
+					impIcon.AnchorPoint = Vector2.new(0, 0.5);
+					impIcon.BackgroundTransparency = 1;
+					impIcon.Position = UDim2.new(0, 7, 0.5, 0);
+					impIcon.Size = UDim2.new(0, 12, 0, 12);
+					impIcon.ZIndex = 11;
+					impIcon.Image = Compkiller:CacheImage("rbxassetid://10709799288");
+					impIcon.ImageColor3 = Compkiller.Colors.SwitchColor;
+					table.insert(Compkiller.Elements.SwitchColor , { Element = impIcon, Property = 'ImageColor3' });
+
+					local impLabel = Instance.new("TextLabel");
+					impLabel.Parent = ImportBtn;
+					impLabel.AnchorPoint = Vector2.new(0, 0.5);
+					impLabel.BackgroundTransparency = 1;
+					impLabel.Position = UDim2.new(0, 23, 0.5, 0);
+					impLabel.Size = UDim2.new(1, -29, 1, 0);
+					impLabel.ZIndex = 11;
+					impLabel.Font = Enum.Font.GothamMedium;
+					impLabel.Text = "Import";
+					impLabel.TextColor3 = Compkiller.Colors.SwitchColor;
+					impLabel.TextSize = 12;
+					impLabel.TextXAlignment = Enum.TextXAlignment.Left;
+					table.insert(Compkiller.Elements.SwitchColor , { Element = impLabel, Property = 'TextColor3' });
+
+					Compkiller:_Hover(ImportBtn, function()
+						Compkiller:_Animation(ImportBtn, TweenInfo.new(0.2), { BackgroundTransparency = 0 });
+					end, function()
+						Compkiller:_Animation(ImportBtn, TweenInfo.new(0.2), { BackgroundTransparency = 0.1 });
+					end);
 				end;
 
 				-- Add a search box above the scrolling frame
@@ -8905,7 +9010,138 @@ function Compkiller.new(Config : Window)
 
 			local Refresh;
 
+			-- ============ Portable config codes (import/export) ============
+			-- Export produces a one-line share code: "BSHCFG1|<base64 json>".
+			-- Import accepts that code OR the raw config JSON, taken from the
+			-- name box (paste target — executors often can't READ the clipboard)
+			-- or from the clipboard when the executor supports reading it.
+
+			local function _TryB64Encode(s)
+				local ok, out = pcall(function()
+					local f = (crypt and crypt.base64encode) or base64encode or base64_encode;
+					return f and f(s) or nil;
+				end);
+				if ok and type(out) == "string" and out ~= "" then return out; end;
+			end;
+
+			local function _TryB64Decode(s)
+				local ok, out = pcall(function()
+					local f = (crypt and crypt.base64decode) or base64decode or base64_decode;
+					return f and f(s) or nil;
+				end);
+				if ok and type(out) == "string" and out ~= "" then return out; end;
+			end;
+
+			local function _ReadClipboard()
+				local ok, out = pcall(function()
+					local f = getclipboard or get_clipboard or getrbxclipboard;
+					return f and f() or nil;
+				end);
+				if ok and type(out) == "string" and out:byte() then return out; end;
+			end;
+
+			function TabArgs.BuildShareCode(raw)
+				local b64 = _TryB64Encode(raw);
+				return b64 and ("BSHCFG1|" .. b64) or raw;
+			end;
+
+			-- Returns the decoded config table, or nil if the string isn't a config
+			local function _DecodePayload(raw)
+				if type(raw) ~= "string" then return nil; end;
+				raw = raw:gsub("^%s+", ""):gsub("%s+$", "");
+				if raw == "" then return nil; end;
+
+				local body = raw:match("^BSHCFG1|(.+)$");
+				if body then
+					raw = _TryB64Decode(body);
+					if not raw then return nil; end;
+				elseif raw:sub(1, 1) ~= "{" then
+					return nil;
+				end;
+
+				local ok, decoded = pcall(HttpService.JSONDecode, HttpService, raw);
+				if ok and type(decoded) == "table" and type(decoded.__INFORMATION) == "table" then
+					return decoded;
+				end;
+				return nil;
+			end;
+
+			local function _LooksLikePayload(s)
+				if type(s) ~= "string" then return false; end;
+				s = s:gsub("^%s+", "");
+				return s:sub(1, 8) == "BSHCFG1|"
+					or (s:sub(1, 1) == "{" and s:find("__INFORMATION", 1, true) ~= nil);
+			end;
+
+			-- Save a decoded config under a collision-free name and refresh the list
+			local function _ImportDecoded(decoded)
+				local importName = _SanitizeName(decoded.__INFORMATION.Name or "Imported");
+				if importName == "" then importName = "Imported"; end;
+
+				local finalName = importName;
+				local suffix = 2;
+				while Configuration.Config:ConfigExists(finalName) do
+					finalName = importName .. "_" .. suffix;
+					suffix = suffix + 1;
+					if suffix > 99 then break; end;
+				end;
+
+				-- Keep the embedded name in sync with the stored filename
+				decoded.__INFORMATION.Name = finalName;
+				local okEnc, encoded = pcall(HttpService.JSONEncode, HttpService, decoded);
+				if not okEnc then
+					_Notify("Failed to encode imported config", 2);
+					return false;
+				end;
+
+				local _path = Compkiller:_Path(Configuration.Config.Directory, finalName);
+				local okWrite = pcall(writefile, _path, encoded);
+				if not okWrite then
+					_Notify("Failed to save imported config", 2);
+					return false;
+				end;
+
+				_Notify("Imported \"" .. finalName .. "\"", 3);
+				Refresh();
+				return true;
+			end;
+
+			local function _DoImport()
+				-- Priority: whatever the user pasted into the name box, then clipboard
+				local candidates = {};
+				if TextBox.Text:byte() then table.insert(candidates, TextBox.Text); end;
+				local clip = _ReadClipboard();
+				if clip then table.insert(candidates, clip); end;
+
+				for _, raw in ipairs(candidates) do
+					local decoded = _DecodePayload(raw);
+					if decoded then
+						if _ImportDecoded(decoded) then
+							TextBox.Text = "";
+						end;
+						return;
+					end;
+				end;
+
+				if #candidates == 0 then
+					_Notify("Copy a config code first, or paste it into the box below", 3);
+				else
+					_Notify("No valid config code found — use the clipboard icon on a config to export one", 3);
+				end;
+			end;
+
 			local function _CreateConfig(rawName)
+				-- Pasted a config code into the name box? Import it instead of
+				-- creating a garbage-named empty config.
+				if _LooksLikePayload(rawName) then
+					local decoded = _DecodePayload(rawName);
+					if decoded then
+						return _ImportDecoded(decoded);
+					end;
+					_Notify("That looks like a config code, but it couldn't be read", 3);
+					return false;
+				end;
+
 				local name = _SanitizeName(rawName);
 				if name == "" then
 					_Notify("Config name cannot be empty", 2);
@@ -8937,58 +9173,7 @@ function Compkiller.new(Config : Window)
 				end;
 			end);
 
-			-- Import from clipboard (explicit, labeled)
-			Compkiller:_Input(SectionClose, function()
-				local ok, raw = pcall(getclipboard);
-				if not (ok and raw and raw:byte()) then
-					_Notify("Clipboard is empty", 2);
-					return;
-				end;
-				local ok2, decoded = pcall(HttpService.JSONDecode, HttpService, raw);
-				if not (ok2 and decoded and decoded.__INFORMATION) then
-					_Notify("Clipboard is not a valid config", 2);
-					return;
-				end;
-
-				local importName = _SanitizeName(decoded.__INFORMATION.Name or "Imported");
-				if importName == "" then importName = "Imported"; end;
-
-				-- If a config with this name already exists, append a numeric suffix
-				local finalName = importName;
-				local suffix = 2;
-				while Configuration.Config:ConfigExists(finalName) do
-					finalName = importName .. "_" .. suffix;
-					suffix = suffix + 1;
-					if suffix > 99 then break; end;
-				end;
-
-				-- Update the embedded name to match the stored filename
-				decoded.__INFORMATION.Name = finalName;
-				local reEncoded;
-				local okEnc, enc = pcall(HttpService.JSONEncode, HttpService, decoded);
-				if okEnc then reEncoded = enc; else reEncoded = raw; end;
-
-				local _path = Compkiller:_Path(Configuration.Config.Directory, finalName);
-				local okWrite = pcall(writefile, _path, reEncoded);
-				if not okWrite then
-					_Notify("Failed to save imported config", 2);
-					return;
-				end;
-
-				_Notify("Imported \"" .. finalName .. "\"", 3);
-				Refresh();
-			end);
-
-			-- Also repurpose the second close icon on the "Add Config" section as a
-			-- quick "paste into name box" shortcut, since it's unused otherwise.
-			Compkiller:_Input(SectionClose_2, function()
-				local ok, raw = pcall(getclipboard);
-				if ok and raw and raw:byte() then
-					-- Only paste the first line, and sanitize
-					local firstLine = raw:match("[^\r\n]+") or "";
-					TextBox.Text = _SanitizeName(firstLine):sub(1, 64);
-				end;
-			end);
+			Compkiller:_Input(ImportBtn, _DoImport);
 
 			Refresh = function()
 				local FullConfig = Configuration.Config:GetFullConfigs();
@@ -9033,7 +9218,8 @@ function Compkiller.new(Config : Window)
 						cfgInfo.Author or "Unknown",
 						cfgName,
 						_autoLoadName == cfgName,
-						_activeName == cfgName
+						_activeName == cfgName,
+						cfgInfo.CreatedDate
 					);
 
 					table.insert(__signals, TabOpenSignal:Connect(function(open)
@@ -9068,7 +9254,8 @@ function Compkiller.new(Config : Window)
 								cfgInfo.Author or WindowArgs.Username,
 								cfgName,
 								_autoLoadName == cfgName,
-								_activeName == cfgName
+								_activeName == cfgName,
+								cfgInfo.CreatedDate
 							);
 							_Notify("Saved \"" .. cfgName .. "\"", 2);
 						else
@@ -9109,21 +9296,27 @@ function Compkiller.new(Config : Window)
 						Refresh();
 					end;
 
-					-- Share: copy raw config JSON to clipboard
+					-- Export: copy a portable share code to the clipboard.
+					-- Falls back to raw JSON when the executor has no base64 support;
+					-- import accepts both forms.
 					Btn.OnShare = function()
 						local _path = Compkiller:_Path(Configuration.Config.Directory, cfgName);
-						if isfile(_path) then
-							local ok, raw = pcall(readfile, _path);
-							if ok and raw then
-								local setOk = pcall(setclipboard, raw);
-								if setOk then
-									_Notify("\"" .. cfgName .. "\" copied to clipboard", 2);
-								else
-									_Notify("Clipboard unavailable on this executor", 3);
-								end;
-							else
-								_Notify("Could not read config file", 2);
-							end;
+						if not isfile(_path) then
+							_Notify("Config file not found", 2);
+							return;
+						end;
+						local ok, raw = pcall(readfile, _path);
+						if not (ok and raw) then
+							_Notify("Could not read config file", 2);
+							return;
+						end;
+
+						local payload = TabArgs.BuildShareCode(raw);
+						local setOk = pcall(setclipboard, payload);
+						if setOk then
+							_Notify("Config code for \"" .. cfgName .. "\" copied — share it anywhere", 3);
+						else
+							_Notify("Clipboard unavailable on this executor", 3);
 						end;
 					end;
 
@@ -9196,7 +9389,7 @@ function Compkiller.new(Config : Window)
 					lbl.Font = Enum.Font.GothamMedium;
 					lbl.Text = (_filterText ~= "")
 						and ("No configs match \"" .. _filterText .. "\"")
-						or "No configs yet — type a name below and click Add Config";
+						or "No configs yet — type a name below and click Add Config, or paste a config code and press Import";
 					lbl.TextColor3 = Compkiller.Colors.SwitchColor;
 					lbl.TextSize = 12;
 					lbl.TextTransparency = 0.4;
