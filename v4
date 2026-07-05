@@ -8600,8 +8600,11 @@ function Compkiller.new(Config : Window)
 			end;
 
 			-- Escape user text for RichText (config names/authors may contain <, >, &)
+			-- NOTE: gsub returns (string, count) — assign first so we return ONE value,
+			-- otherwise callers like table.insert(t, _EscRich(x)) get the extra count.
 			local function _EscRich(s)
-				return tostring(s):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;");
+				s = tostring(s):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;");
+				return s;
 			end;
 
 			function ConfigButton:SetInfo(Author, ConfigName, isAutoLoad, isActive, CreatedDate)
