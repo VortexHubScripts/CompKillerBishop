@@ -4312,6 +4312,11 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 		ScrollingFrame.CanvasSize = UDim2.fromOffset(UIListLayout.AbsoluteContentSize.X,UIListLayout.AbsoluteContentSize.Y)
 	end);
 
+	-- Assigned after Values is declared below; computes the open height from the
+	-- value count because UIListLayout.AbsoluteContentSize is stale in the same
+	-- frame the items were rebuilt (caused freshly-rebuilt dropdowns to open ~10px tall).
+	local GetOpenHeight;
+
 	local ToggleUI = function(bool)
 		local IsSame = ToggleDb:GetValue() == bool;
 
@@ -4340,7 +4345,7 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 			Compkiller:_Animation(DropdownWindow,TweenInfo.new(0.2),{
 				BackgroundTransparency = 0,
 				Position = MainPosition,
-				Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, math.clamp(UIListLayout.AbsoluteContentSize.Y + 10,10 , 200))
+				Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, (GetOpenHeight and GetOpenHeight()) or math.clamp(UIListLayout.AbsoluteContentSize.Y + 10,10 , 200))
 			})
 
 			Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
@@ -4393,6 +4398,13 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	local Default = nil;
 	local Values = nil;
 	local IsMulti = false;
+
+	GetOpenHeight = function()
+		-- Each item is 20px tall with 10px list padding between items.
+		local n = (typeof(Values) == 'table' and #Values) or 0;
+		local computed = (n > 0 and (n * 20 + (n - 1) * 10)) or 0;
+		return math.clamp(math.max(computed, UIListLayout.AbsoluteContentSize.Y) + 10, 10, 200);
+	end;
 
 	local DrawButton = function()
 		local DropdownItem = Instance.new("Frame")
@@ -4460,6 +4472,8 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 		for i,v in next,  __signals do
 			v:Disconnect();
 		end;
+
+		table.clear(__signals);
 	end;
 
 	local IsDefault = function(v)
@@ -4582,6 +4596,7 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 		if SpamUpdate then
 			ClearDropdown();
 			UpdateDropdown();
+			SpamUpdate = false;
 		end;
 
 		ToggleUI(true);
@@ -8608,19 +8623,12 @@ function Compkiller.new(Config : Window)
 			end;
 
 			function ConfigButton:SetInfo(Author, ConfigName, isAutoLoad, isActive, CreatedDate)
+				-- Author parameter is accepted for API compatibility but not displayed
 				_plainName = ConfigName or "Config";
 
-				local meta = {};
-				if Author and Author ~= "" and Author ~= "Unknown" then
-					table.insert(meta, "by " .. _EscRich(Author));
-				end;
 				if CreatedDate and CreatedDate ~= "" then
-					table.insert(meta, _EscRich(CreatedDate));
-				end;
-
-				if #meta > 0 then
 					ConfigText.Text = _EscRich(_plainName)
-						.. '  <font color="#9aa0ad" size="11">' .. table.concat(meta, " · ") .. '</font>';
+						.. '  <font color="#9aa0ad" size="11">' .. _EscRich(CreatedDate) .. '</font>';
 				else
 					ConfigText.Text = _EscRich(_plainName);
 				end;
@@ -9502,8 +9510,9 @@ function Compkiller.new(Config : Window)
 		});
 
 		-- Guards against async config-load callbacks corrupting UITheme.
-		local _uiInitTheme    = nil;   -- first theme fired during Init (= real saved value)
-		local _themeDropdown  = nil;   -- ref so post-load task can reset the label
+		-- (LoadConfig sets Compkiller._IsLoadingConfig while flags are applied and
+		-- fires Compkiller._ConfigLoadedCallbacks afterwards; we use both.)
+		local _themeDropdown  = nil;   -- ref so post-load sync can reset the label
 		local _uiReady        = false; -- gates switchToCustom() until Init() fires
 		local _configInitDone = false; -- gates SetValue("Custom") until 3s post-load
 
@@ -9531,24 +9540,46 @@ function Compkiller.new(Config : Window)
 			Default = "Default",
 			Values  = { "Default", "Dark Blue", "Dark Green", "Purple Rose", "Skeet", "Crimson Dark", "Custom" },
 			Callback = function(v)
-				-- Capture only the very first fired value (the real saved theme).
-				-- switchToCustom() re-triggers this; the nil-guard keeps _uiInitTheme accurate.
-				if _uiInitTheme == nil then _uiInitTheme = v end;
 				pcall(function() Compkiller:SetTheme(v) end);
 			end,
 		});
 		_themeDropdown = themeDropdown;
 
--- Called by every color picker callback; switches theme label to Custom
-		-- only once Init() has settled (avoids corrupting the saved UITheme flag
-		-- while LoadConfig async callbacks are still running).
+		-- Called by every color picker callback; switches theme label to Custom.
+		-- Suppressed while a config load is applying flags — the pickers firing
+		-- during a load are just restoring saved values, not user edits, and the
+		-- post-load sync below re-applies the real saved theme afterwards.
 		local function switchToCustom()
 			if not _uiReady then return end;
+			if Compkiller._IsLoadingConfig then return end;
 			pcall(function() Compkiller:SetTheme("Custom") end);
 			if _configInitDone then
 				pcall(function() themeDropdown:SetValue("Custom") end);
 			end;
 		end;
+
+		-- After EVERY config load (manual or auto), re-apply the theme from the
+		-- final UITheme flag value. Flags apply in arbitrary order during a load,
+		-- so a color picker restoring its saved color can overwrite the theme
+		-- palette; re-asserting the saved theme at the end makes the result
+		-- order-independent (this is what used to require a manual force-load).
+		Compkiller._ConfigLoadedCallbacks = Compkiller._ConfigLoadedCallbacks or {};
+		table.insert(Compkiller._ConfigLoadedCallbacks, function()
+			task.defer(function()
+				pcall(function()
+					local flag = Compkiller.Flags and Compkiller.Flags.UITheme;
+					local saved = flag and flag:GetValue();
+					if type(saved) == "string" and saved ~= "" then
+						-- "Custom" hits no palette branch in SetTheme, so it just
+						-- refreshes with the picker-applied colors — exactly right.
+						Compkiller:SetTheme(saved);
+						if saved ~= "Custom" and _themeDropdown then
+							pcall(function() _themeDropdown:SetValue(saved) end);
+						end;
+					end;
+				end);
+			end);
+		end);
 
 		local function applyColor(key, color)
 			Compkiller.Colors[key] = color;
@@ -9847,11 +9878,12 @@ function Compkiller.new(Config : Window)
 		-- Call UISettings:Init() right after ConfigUI:Init() so that:
 		--   1. _uiReady = true  → switchToCustom() now applies colors when the
 		--      user changes a color picker (but flag-write is still gated).
-		--   2. After 3 s the post-load task sets _configInitDone = true and
-		--      restores the real saved theme, undoing any "Custom" corruption
-		--      caused by async LoadConfig callbacks.
-		-- An optional OnPostLoad(readFlag) callback is fired in the same task
-		-- so callers can re-apply runtime state (e.g. re-enable Infinite M1).
+		--   2. After 3 s _configInitDone = true, allowing switchToCustom() to
+		--      also update the dropdown label (and thus the saved UITheme flag).
+		-- Theme restoration after config loads is handled by the
+		-- _ConfigLoadedCallbacks hook above — no timer-based restore needed.
+		-- An optional OnPostLoad callback is fired in the same task so callers
+		-- can re-apply runtime state (e.g. re-enable Infinite M1).
 		local UISettingsInit = {};
 
 		function UISettingsInit:Init(OnPostLoad)
@@ -9859,17 +9891,6 @@ function Compkiller.new(Config : Window)
 			task.spawn(function()
 				task.wait(3);
 				_configInitDone = true;
-
-				-- Restore the real saved theme.
-				pcall(function()
-					local savedTheme = _uiInitTheme;
-					if savedTheme and savedTheme ~= "Custom" then
-						Compkiller:SetTheme(savedTheme);
-						if _themeDropdown then
-							pcall(function() _themeDropdown:SetValue(savedTheme) end);
-						end;
-					end;
-				end);
 
 				if type(OnPostLoad) == "function" then
 					pcall(OnPostLoad);
@@ -11495,6 +11516,8 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 
 		local Flags = Compkiller:GetConfig("KV");
 
+		Compkiller._IsLoadingConfig = true;
+
 		for i,v in next , decoded do
 			if v and v.Flag then
 
@@ -11502,19 +11525,27 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 
 				if Value then
 
-					if v.Value.Type == "NormalElement" then
-						Value.Functions:SetValue(v.Value.Value);
+					pcall(function()
+						if v.Value.Type == "NormalElement" then
+							Value.Functions:SetValue(v.Value.Value);
 
-					elseif v.Value.Type == "ColorPicker" then
+						elseif v.Value.Type == "ColorPicker" then
 
-						local Color = Color3.new(v.Value.Color3.R,v.Value.Color3.G,v.Value.Color3.B);
+							local Color = Color3.new(v.Value.Color3.R,v.Value.Color3.G,v.Value.Color3.B);
 
-						local Transparency = v.Value.Transparency;
+							local Transparency = v.Value.Transparency;
 
-						Value.Functions:SetValue(Color , Transparency);
-					end;
+							Value.Functions:SetValue(Color , Transparency);
+						end;
+					end);
 				end;
 			end
+		end;
+
+		Compkiller._IsLoadingConfig = false;
+
+		for _, cb in next , Compkiller._ConfigLoadedCallbacks or {} do
+			pcall(cb);
 		end;
 	end;
 
@@ -11678,6 +11709,11 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 				})
 			end
 
+			-- Flag callbacks fire in arbitrary order below. Mark the load as in
+			-- progress so listeners (e.g. UI Settings' switchToCustom) can avoid
+			-- reacting to mid-load callback churn.
+			Compkiller._IsLoadingConfig = true;
+
 			for i,v in next , decoded do
 				if v and v.Flag then
 
@@ -11708,6 +11744,14 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 						end;
 					end;
 				end
+			end;
+
+			Compkiller._IsLoadingConfig = false;
+
+			-- Let listeners re-sync anything that depends on the FINAL flag values
+			-- rather than the (arbitrary) order callbacks fired in during the load.
+			for _, cb in next , Compkiller._ConfigLoadedCallbacks or {} do
+				pcall(cb, ConfigName);
 			end;
 		end;
 	end;
