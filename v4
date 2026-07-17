@@ -9799,14 +9799,63 @@ function Compkiller.new(Config : Window)
 			Position = "left",
 		});
 
-		ControlsSection:AddKeybind({
+		-- The menu toggle keybind is persisted in its OWN file (outside the
+		-- config system) so it stays the same no matter which config the
+		-- player loads. Config loads that carry a different UIToggleKeybind
+		-- value get overridden by the file right after the load finishes.
+		local KeybindFile = Compkiller:_Path(Compkiller._BaseDirectory or "Compkiller", "menu_keybind.txt");
+
+		local function readSavedMenuKey()
+			local ok, key = pcall(function()
+				if isfile(KeybindFile) then
+					return readfile(KeybindFile);
+				end;
+				return nil;
+			end);
+			if ok and type(key) == "string" and key ~= "" then
+				return key;
+			end;
+			return nil;
+		end;
+
+		local function writeSavedMenuKey(key)
+			pcall(function()
+				local dir = Compkiller._BaseDirectory or "Compkiller";
+				if not isfolder(dir) then
+					makefolder(dir);
+				end;
+				writefile(KeybindFile, tostring(key));
+			end);
+		end;
+
+		local savedMenuKey = readSavedMenuKey() or "LeftAlt";
+		pcall(function() WindowArgs:SetMenuKey(savedMenuKey) end);
+
+		local menuKeybind;
+		menuKeybind = ControlsSection:AddKeybind({
 			Name     = "Toggle Menu",
-			Default  = "LeftAlt",
+			Default  = savedMenuKey,
 			Flag     = "UIToggleKeybind",
 			Callback = function(key)
 				pcall(function() WindowArgs:SetMenuKey(key) end);
+				-- Only real user rebinds get saved — flags applied during a
+				-- config load must not overwrite the persistent keybind file.
+				if not Compkiller._IsLoadingConfig then
+					writeSavedMenuKey(key);
+				end;
 			end,
 		});
+
+		-- After every config load, re-assert the file-saved keybind so a
+		-- config with a different saved UIToggleKeybind can't change it.
+		table.insert(Compkiller._ConfigLoadedCallbacks, function()
+			task.defer(function()
+				local saved = readSavedMenuKey();
+				if saved then
+					pcall(function() menuKeybind:SetValue(saved) end);
+				end;
+			end);
+		end);
 
 		-- Uses Toggle() so the keybind can bring it back. SetVisible() would
 		-- disable the root ScreenGui, which Toggle() never re-enables.
@@ -9830,14 +9879,51 @@ function Compkiller.new(Config : Window)
 			end,
 		});
 
+		-- The consumer script may never call Window:Watermark(), which left
+		-- WindowArgs._WatermarkRoot nil and made this toggle a no-op. Create
+		-- a default watermark lazily (name + FPS + clock) the first time the
+		-- toggle is on, so it always has something real to show/hide.
+		local function ensureWatermark()
+			if WindowArgs._WatermarkRoot then return end;
+			pcall(function()
+				local wm = WindowArgs:Watermark();
+				wm:AddText({ Text = Config.Name, Icon = "shield" });
+				local fpsText  = wm:AddText({ Text = "FPS: --", Icon = "activity" });
+				local timeText = wm:AddText({ Text = os.date("%H:%M:%S"), Icon = "clock" });
+
+				table.insert(WindowArgs.THREADS, task.spawn(function()
+					while WindowArgs._WatermarkRoot and WindowArgs._WatermarkRoot.Parent do
+						local frames = 0;
+						local start = os.clock();
+						while os.clock() - start < 1 do
+							RunService.RenderStepped:Wait();
+							frames += 1;
+						end;
+						pcall(function()
+							fpsText:SetText("FPS: " .. frames);
+							timeText:SetText(os.date("%H:%M:%S"));
+						end);
+					end;
+				end));
+			end);
+		end;
+
 		ControlsSection:AddToggle({
 			Name     = "Watermark",
 			Flag     = "UIWatermark",
 			Default  = true,
 			Callback = function(v)
+				if v then
+					ensureWatermark();
+				end;
 				pcall(function() WindowArgs:SetWatermarkVisible(v) end);
 			end,
 		});
+
+		-- Toggles don't fire their callback on creation, so build the default
+		-- watermark now (Default = true). A config that saved UIWatermark=false
+		-- will simply hide it when it loads.
+		ensureWatermark();
 
 		ControlsSection:AddToggle({
 			Name     = "Rainbow Accent",
@@ -9871,6 +9957,13 @@ function Compkiller.new(Config : Window)
 			Round    = 0,
 			Callback = function(v)
 				pcall(function() setfpscap(v) end);
+			end,
+		});
+
+		ControlsSection:AddButton({
+			Name     = "Unload Script",
+			Callback = function()
+				WindowArgs:Unload();
 			end,
 		});
 
@@ -11071,6 +11164,71 @@ function Compkiller.new(Config : Window)
 		Config.Keybind = new;
 	end;
 
+	-- Register a callback that runs when the script is unloaded (before the
+	-- UI is destroyed). Consumers use this to kill loops/connections that
+	-- aren't driven by a toggle flag.
+	function WindowArgs:OnUnload(callback)
+		WindowArgs._UnloadCallbacks = WindowArgs._UnloadCallbacks or {};
+		table.insert(WindowArgs._UnloadCallbacks, callback);
+	end;
+
+	-- Full teardown: turns every enabled toggle off (firing its callback so
+	-- the feature cleans itself up), runs OnUnload hooks, then destroys every
+	-- GUI/thread the library created.
+	function WindowArgs:Unload()
+		if WindowArgs._Unloaded then return end;
+		WindowArgs._Unloaded = true;
+
+		-- 1) Flip every enabled toggle off so feature callbacks disable
+		--    themselves (ESP, farms, rainbow accent, etc.).
+		for _, flag in next, Compkiller.Flags do
+			pcall(function()
+				if flag:GetValue() == true then
+					flag:SetValue(false);
+				end;
+			end);
+		end;
+
+		-- 2) Consumer cleanup hooks.
+		for _, cb in next, WindowArgs._UnloadCallbacks or {} do
+			pcall(cb);
+		end;
+
+		-- 3) Kill the menu keybind listener + background threads.
+		Config.Keybind = nil;
+		for _, item in next, WindowArgs.THREADS do
+			if typeof(item) == "thread" then
+				pcall(task.cancel, item);
+			end;
+		end;
+
+		-- 4) Tear down the GUIs (watermark, notifications, main window).
+		pcall(function()
+			if WindowArgs._WatermarkRoot then
+				WindowArgs._WatermarkRoot:Destroy();
+				WindowArgs._WatermarkRoot = nil;
+			end;
+		end);
+
+		pcall(function()
+			if Compkiller.NOTIFY_CACHE and Compkiller.NOTIFY_CACHE.Root then
+				Compkiller.NOTIFY_CACHE.Root:Destroy();
+			end;
+			Compkiller.NOTIFY_CACHE = nil;
+		end);
+
+		local index = table.find(Compkiller.Windows, CompKiller);
+		if index then
+			table.remove(Compkiller.Windows, index);
+		end;
+
+		if Compkiller.WindowSignals then
+			Compkiller.WindowSignals[CompKiller] = nil;
+		end;
+
+		pcall(function() CompKiller:Destroy() end);
+	end;
+
 	-- DrawSettings: populates the built-in UserSettings panel (opened via avatar click)
 	function WindowArgs:DrawSettings()
 		-- Idempotent: if DrawSettings has already been called (either automatically
@@ -11457,6 +11615,10 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 		Directory = "Compkiller",
 		Config = "Software"
 	});
+
+	-- Remember the base directory so per-user global settings that must
+	-- survive config switches (e.g. the menu toggle keybind) have a home.
+	Compkiller._BaseDirectory = ConfigManager.Directory;
 
 	if not isfolder(ConfigManager.Directory) then
 		makefolder(ConfigManager.Directory);
@@ -11896,6 +12058,7 @@ function Compkiller.newNotify()
 	local LayoutREF = 0;
 
 	Compkiller.NOTIFY_CACHE = {
+		Root = Notification,
 		new = function(Notify: Notify) : NotifyPayback
 			if Compkiller.NotificationsEnabled == false then return {} end;
 
