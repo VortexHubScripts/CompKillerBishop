@@ -6499,7 +6499,7 @@ function Compkiller.new(Config : Window)
 	MainFrame:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
 		if MainFrame.BackgroundTransparency > 0.9 then
 			MainFrame.Visible = false;
-			MainFrame.Modal = false;
+			pcall(function() MainFrame.Modal = false end);
 		else
 			MainFrame.Visible = true;
 			-- Roblox's own system dialogs (teleport failed, etc.) set Modal = true
@@ -6508,7 +6508,8 @@ function Compkiller.new(Config : Window)
 			-- has nothing to do with render order. Claiming Modal ourselves while
 			-- the menu is open reclaims input focus so our own buttons/sliders
 			-- keep working even while one of those dialogs is up.
-			MainFrame.Modal = true;
+			-- pcall'd: Modal isn't a valid GuiObject property on every client version.
+			pcall(function() MainFrame.Modal = true end);
 		end;
 	end)
 
