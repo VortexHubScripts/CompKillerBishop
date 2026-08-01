@@ -5154,7 +5154,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			Property = "Color"
 		});
 
-		UICorner.CornerRadius = UDim.new(0, 6)
+		UICorner.CornerRadius = UDim.new(1, 0)
 		UICorner.Parent = SliderBar
 
 		SliderInput.Name = Compkiller:_RandomString()
@@ -5172,7 +5172,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			Property = "BackgroundColor3"
 		});
 
-		UICorner_2.CornerRadius = UDim.new(0, 6)
+		UICorner_2.CornerRadius = UDim.new(1, 0)
 		UICorner_2.Parent = SliderInput
 
 		Frame.Parent = SliderInput
@@ -6467,6 +6467,7 @@ function Compkiller.new(Config : Window)
 	CompKiller.ResetOnSpawn = false
 	CompKiller.IgnoreGuiInset = true;
 	CompKiller.ZIndexBehavior = Enum.ZIndexBehavior.Global;
+	CompKiller.DisplayOrder = 2147483647;
 
 	Compkiller.ProtectGui(CompKiller);
 
@@ -9688,111 +9689,6 @@ function Compkiller.new(Config : Window)
 			end,
 		});
 
-		-- ── Color Presets ────────────────────────────────────────────────
-		local ColorPresetsSection = UITab:DrawSection({
-			Name     = "Color Presets",
-			Position = "left",
-		});
-
-		local PRESET_DIR       = "BishopHub/ColorPresets";
-		local _presetDropdown  = nil;
-		local _presetNameValue = "";
-
-		local function colorToTable(c)
-			return { r = c.R, g = c.G, b = c.B };
-		end;
-
-		local function tableToColor(t)
-			return Color3.new(t.r or 0, t.g or 0, t.b or 0);
-		end;
-
-		local function getPresetNames()
-			if not isfolder(PRESET_DIR) then return {} end;
-			local names = {};
-			for _, path in ipairs(listfiles(PRESET_DIR)) do
-				local n = path:match("([^/\\]+)%.json$");
-				if n then table.insert(names, n) end;
-			end;
-			return names;
-		end;
-
-		local function refreshPresetDropdown()
-			if not _presetDropdown then return end;
-			local names = getPresetNames();
-			if #names == 0 then names = { "(none)" } end;
-			pcall(function() _presetDropdown:SetValues(names) end);
-		end;
-
-		local _initPresetNames = getPresetNames();
-		if #_initPresetNames == 0 then _initPresetNames = { "(none)" } end;
-
-		_presetDropdown = ColorPresetsSection:AddDropdown({
-			Name    = "Select Preset",
-			Values  = _initPresetNames,
-			Default = _initPresetNames[1],
-		});
-
-		ColorPresetsSection:AddTextBox({
-			Name        = "Preset Name",
-			Default     = "",
-			Placeholder = "Enter name...",
-			Callback    = function(v) _presetNameValue = v end,
-		});
-
-		ColorPresetsSection:AddButton({
-			Name     = "Save Current Colors",
-			Callback = function()
-				local name = _presetNameValue;
-				if name == "" then return end;
-				pcall(function()
-					if not isfolder(PRESET_DIR) then makefolder(PRESET_DIR) end;
-					local hs = game:GetService("HttpService");
-					local data = {
-						Accent     = colorToTable(Compkiller.Colors.Highlight       or Color3.new(0,1,1)),
-						Background = colorToTable(Compkiller.Colors.BGDBColor       or Color3.new()),
-						BlockBG    = colorToTable(Compkiller.Colors.BlockBackground or Color3.new()),
-						Block      = colorToTable(Compkiller.Colors.BlockColor      or Color3.new()),
-						Dropdown   = colorToTable(Compkiller.Colors.DropColor       or Color3.new()),
-						Border     = colorToTable(Compkiller.Colors.StrokeColor     or Color3.new()),
-						HighBorder = colorToTable(Compkiller.Colors.HighStrokeColor or Color3.new()),
-						Separator  = colorToTable(Compkiller.Colors.LineColor       or Color3.new()),
-						Text       = colorToTable(Compkiller.Colors.SwitchColor     or Color3.new()),
-					};
-					writefile(PRESET_DIR .. "/" .. name .. ".json", hs:JSONEncode(data));
-				end);
-				refreshPresetDropdown();
-			end,
-		});
-
-		ColorPresetsSection:AddButton({
-			Name     = "Load Selected Preset",
-			Callback = function()
-				local sel;
-				pcall(function() sel = _presetDropdown:GetValue() end);
-				if not sel or sel == "(none)" then return end;
-				local path = PRESET_DIR .. "/" .. sel .. ".json";
-				if not isfile(path) then return end;
-				pcall(function()
-					local hs   = game:GetService("HttpService");
-					local data = hs:JSONDecode(readfile(path));
-					if not data then return end;
-					if data.Accent     then Compkiller:ChangeHighlightColor(tableToColor(data.Accent)) end;
-					if data.Background then applyColor("BGDBColor",       tableToColor(data.Background)) end;
-					if data.BlockBG    then applyColor("BlockBackground", tableToColor(data.BlockBG)) end;
-					if data.Block      then applyColor("BlockColor",      tableToColor(data.Block)) end;
-					if data.Dropdown   then applyColor("DropColor",       tableToColor(data.Dropdown)) end;
-					if data.Border     then applyColor("StrokeColor",     tableToColor(data.Border)) end;
-					if data.HighBorder then applyColor("HighStrokeColor", tableToColor(data.HighBorder)) end;
-					if data.Separator  then applyColor("LineColor",       tableToColor(data.Separator)) end;
-					if data.Text       then applyColor("SwitchColor",     tableToColor(data.Text)) end;
-					Compkiller:SetTheme("Custom");
-					if _configInitDone then
-						pcall(function() themeDropdown:SetValue("Custom") end);
-					end;
-				end);
-			end,
-		});
-
 		-- ── Controls ─────────────────────────────────────────────────────
 		local ControlsSection = UITab:DrawSection({
 			Name     = "Controls",
@@ -9945,18 +9841,6 @@ function Compkiller.new(Config : Window)
 						_rainbowThread = nil;
 					end;
 				end;
-			end,
-		});
-
-		ControlsSection:AddSlider({
-			Name     = "FPS Cap",
-			Flag     = "UIFpsCap",
-			Min      = 0,
-			Max      = 360,
-			Default  = 60,
-			Round    = 0,
-			Callback = function(v)
-				pcall(function() setfpscap(v) end);
 			end,
 		});
 
@@ -11144,7 +11028,9 @@ function Compkiller.new(Config : Window)
 						});
 					end;
 				else
-					if not WindowArgs.IsOpen then
+					local WatermarkHidden = WindowArgs._WatermarkRoot and not WindowArgs._WatermarkRoot.Visible;
+
+					if not WindowArgs.IsOpen and not WatermarkHidden then
 						ToggleCloseUI(true);
 					else
 						ToggleCloseUI(false);
@@ -11930,6 +11816,7 @@ function Compkiller:Loader(IconId,Duration)
 	CompKiller.ResetOnSpawn = false
 	CompKiller.IgnoreGuiInset = true
 	CompKiller.ZIndexBehavior = Enum.ZIndexBehavior.Global
+	CompKiller.DisplayOrder = 2147483647
 
 	local Loader = Instance.new("Frame")
 	local Icon = Instance.new("ImageLabel")
@@ -12038,6 +11925,7 @@ function Compkiller.newNotify()
 	Notification.Parent = CoreGui;
 	Notification.ResetOnSpawn = false
 	Notification.ZIndexBehavior = Enum.ZIndexBehavior.Global
+	Notification.DisplayOrder = 2147483647
 
 	NotifyContainer.Name = Compkiller:_RandomString()
 	NotifyContainer.Parent = Notification
