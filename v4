@@ -11137,6 +11137,13 @@ function Compkiller.new(Config : Window)
 			Compkiller.NOTIFY_CACHE = nil;
 		end);
 
+		-- __KEYBINDS_CACHE holds Args whose closures capture THIS window's
+		-- Keybinds frame + Window instance. Left uncleared, the next
+		-- Compkiller.new() reuses it, and any later toggle tries to reparent
+		-- a frame destroyed along with this window -- Roblox throws "Parent
+		-- property is locked" since Destroy() permanently locks it.
+		Compkiller.__KEYBINDS_CACHE = nil;
+
 		local index = table.find(Compkiller.Windows, CompKiller);
 		if index then
 			table.remove(Compkiller.Windows, index);
