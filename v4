@@ -5191,10 +5191,6 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		Frame.Size = UDim2.new(1.3, 0, 1.3, 0)
 		Frame.SizeConstraint = Enum.SizeConstraint.RelativeYY
 		Frame.ZIndex = Zindex + 6
-		-- Handle "dot" is offset 5px past SliderInput's right edge, which sits
-		-- outside the pill fill at low values, reading as a stray floating dot
-		-- rather than a handle. Disabled outright; the pill fill is the handle.
-		Frame.Visible = false
 
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = Frame,
