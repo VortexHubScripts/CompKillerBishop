@@ -6505,8 +6505,16 @@ function Compkiller.new(Config : Window)
 	MainFrame:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
 		if MainFrame.BackgroundTransparency > 0.9 then
 			MainFrame.Visible = false;
+			MainFrame.Modal = false;
 		else
 			MainFrame.Visible = true;
+			-- Roblox's own system dialogs (teleport failed, etc.) set Modal = true
+			-- on themselves, which silently steals ALL input away from every GUI
+			-- behind them — regardless of DisplayOrder/ZIndex, since Modal capture
+			-- has nothing to do with render order. Claiming Modal ourselves while
+			-- the menu is open reclaims input focus so our own buttons/sliders
+			-- keep working even while one of those dialogs is up.
+			MainFrame.Modal = true;
 		end;
 	end)
 
@@ -11018,6 +11026,14 @@ function Compkiller.new(Config : Window)
 
 		table.insert(WindowArgs.THREADS,task.spawn(function()
 			while true do task.wait(0.5)
+				-- Reassert Modal every tick while open: only the most-recently-set
+				-- Modal GuiObject wins input capture, so a Roblox system dialog
+				-- (teleport failed, etc) popping up AFTER the menu opens would
+				-- otherwise steal input back. Re-claiming it here wins that race.
+				if WindowArgs.IsOpen then
+					pcall(function() MainFrame.Modal = true end);
+				end;
+
 				if Compkiller:_IsMobile() then
 					ToggleCloseUI(true);
 
