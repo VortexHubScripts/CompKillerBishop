@@ -362,14 +362,38 @@ local Players: Players = cloneref(game:GetService('Players'));
 local HttpService: HttpService = cloneref(game:GetService('HttpService'));
 local LocalPlayer: Player = Players.LocalPlayer;
 local CoreGui: PlayerGui = (gethui and gethui()) or (get_hidden_gui and get_hidden_gui()) or cloneref(game:FindFirstChild('CoreGui')) or cloneref(LocalPlayer.PlayerGui);
--- Root used specifically for the top-level window/loader/notification ScreenGuis.
--- Roblox's own notifications (join messages, friend requests, etc.) render inside
--- the REAL CoreGui, not the executor's gethui() layer -- DisplayOrder is only
--- reliably compared between GUIs that share a container, so these have to live
--- in the same real CoreGui to actually end up on top of them.
-local RealCoreGui: Instance = cloneref(game:GetService('CoreGui'));
 local Mouse: Mouse = LocalPlayer:GetMouse();
 local CurrentCamera: Camera? = cloneref(workspace.CurrentCamera);
+
+-- Parents `gui` to the REAL CoreGui service (elevating thread identity for the
+-- write, since some executors reject Instance.Parent = CoreGui at the default
+-- identity) so DisplayOrder is compared against the same container Roblox's own
+-- notifications (join messages, friend requests, etc.) actually render in --
+-- gethui() is a separate executor-injected layer and isn't reliably ordered
+-- against it. Falls straight back to the known-working gethui()-based `CoreGui`
+-- local if elevation/parenting fails for any reason, so the UI never just
+-- silently fails to appear.
+local function _ParentToTop(gui: Instance)
+	local originalIdentity;
+	if getthreadidentity then
+		local ok, id = pcall(getthreadidentity);
+		if ok then originalIdentity = id end;
+	end;
+
+	if setthreadidentity then pcall(setthreadidentity, 8) end;
+
+	pcall(function()
+		gui.Parent = game:GetService('CoreGui');
+	end);
+
+	if originalIdentity and setthreadidentity then
+		pcall(setthreadidentity, originalIdentity);
+	end;
+
+	if gui.Parent == nil then
+		pcall(function() gui.Parent = CoreGui end);
+	end;
+end;
 
 local Compkiller = {
 	Version = '2.6',
@@ -6473,7 +6497,7 @@ function Compkiller.new(Config : Window)
 	end);
 
 	CompKiller.Name = "u?name=compkiller_?"..Compkiller:_RandomString();
-	CompKiller.Parent = RealCoreGui;
+	_ParentToTop(CompKiller);
 	CompKiller.ResetOnSpawn = false
 	CompKiller.IgnoreGuiInset = true;
 	CompKiller.ZIndexBehavior = Enum.ZIndexBehavior.Global;
@@ -11821,7 +11845,7 @@ function Compkiller:Loader(IconId,Duration)
 	local CompKiller = Instance.new("ScreenGui")
 
 	CompKiller.Name = Compkiller:_RandomString()
-	CompKiller.Parent = RealCoreGui
+	_ParentToTop(CompKiller);
 	CompKiller.Enabled = true
 	CompKiller.ResetOnSpawn = false
 	CompKiller.IgnoreGuiInset = true
@@ -11932,7 +11956,7 @@ function Compkiller.newNotify()
 	local UIListLayout = Instance.new("UIListLayout")
 
 	Notification.Name = Compkiller:_RandomString()
-	Notification.Parent = RealCoreGui;
+	_ParentToTop(Notification);
 	Notification.ResetOnSpawn = false
 	Notification.ZIndexBehavior = Enum.ZIndexBehavior.Global
 	Notification.DisplayOrder = 2147483647
