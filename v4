@@ -361,14 +361,7 @@ local RunService: RunService = cloneref(game:GetService('RunService'));
 local Players: Players = cloneref(game:GetService('Players'));
 local HttpService: HttpService = cloneref(game:GetService('HttpService'));
 local LocalPlayer: Player = Players.LocalPlayer;
--- Real CoreGui is preferred over gethui()/get_hidden_gui(): those hidden
--- containers exist to hide UI from game scripts, but they aren't guaranteed
--- to share the same DisplayOrder compositing space as Roblox's own system
--- notifications (join/leave toasts, chat, etc). Parenting to the real
--- CoreGui is required for our DisplayOrder to actually be compared against
--- those. Only fall back to the hidden containers if real CoreGui isn't
--- accessible at all.
-local CoreGui: PlayerGui = cloneref(game:GetService('CoreGui')) or (gethui and gethui()) or (get_hidden_gui and get_hidden_gui()) or cloneref(LocalPlayer.PlayerGui);
+local CoreGui: PlayerGui = (gethui and gethui()) or (get_hidden_gui and get_hidden_gui()) or cloneref(game:FindFirstChild('CoreGui')) or cloneref(LocalPlayer.PlayerGui);
 local Mouse: Mouse = LocalPlayer:GetMouse();
 local CurrentCamera: Camera? = cloneref(workspace.CurrentCamera);
 
@@ -6475,6 +6468,7 @@ function Compkiller.new(Config : Window)
 	CompKiller.IgnoreGuiInset = true;
 	CompKiller.ZIndexBehavior = Enum.ZIndexBehavior.Global;
 	CompKiller.DisplayOrder = 2147483647;
+	pcall(function() CompKiller.OnTopOfCoreBlur = true end);
 
 	Compkiller.ProtectGui(CompKiller);
 
@@ -11840,6 +11834,7 @@ function Compkiller:Loader(IconId,Duration)
 	CompKiller.IgnoreGuiInset = true
 	CompKiller.ZIndexBehavior = Enum.ZIndexBehavior.Global
 	CompKiller.DisplayOrder = 2147483647
+	pcall(function() CompKiller.OnTopOfCoreBlur = true end)
 
 	local Loader = Instance.new("Frame")
 	local Icon = Instance.new("ImageLabel")
@@ -11949,6 +11944,7 @@ function Compkiller.newNotify()
 	Notification.ResetOnSpawn = false
 	Notification.ZIndexBehavior = Enum.ZIndexBehavior.Global
 	Notification.DisplayOrder = 2147483647
+	pcall(function() Notification.OnTopOfCoreBlur = true end)
 
 	NotifyContainer.Name = Compkiller:_RandomString()
 	NotifyContainer.Parent = Notification
