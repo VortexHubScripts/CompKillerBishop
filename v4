@@ -361,13 +361,14 @@ local RunService: RunService = cloneref(game:GetService('RunService'));
 local Players: Players = cloneref(game:GetService('Players'));
 local HttpService: HttpService = cloneref(game:GetService('HttpService'));
 local LocalPlayer: Player = Players.LocalPlayer;
-local CoreGui: PlayerGui = (gethui and gethui()) or (get_hidden_gui and get_hidden_gui()) or cloneref(game:FindFirstChild('CoreGui')) or cloneref(LocalPlayer.PlayerGui);
--- Root used specifically for the top-level window/loader/notification ScreenGuis.
--- Roblox's own notifications (join messages, friend requests, etc.) render inside
--- the REAL CoreGui, not the executor's gethui() layer -- DisplayOrder is only
--- reliably compared between GUIs that share a container, so these have to live
--- in the same real CoreGui to actually end up on top of them.
-local RealCoreGui: Instance = cloneref(game:GetService('CoreGui'));
+-- Real CoreGui is preferred over gethui()/get_hidden_gui(): those hidden
+-- containers exist to hide UI from game scripts, but they aren't guaranteed
+-- to share the same DisplayOrder compositing space as Roblox's own system
+-- notifications (join/leave toasts, chat, etc). Parenting to the real
+-- CoreGui is required for our DisplayOrder to actually be compared against
+-- those. Only fall back to the hidden containers if real CoreGui isn't
+-- accessible at all.
+local CoreGui: PlayerGui = cloneref(game:GetService('CoreGui')) or (gethui and gethui()) or (get_hidden_gui and get_hidden_gui()) or cloneref(LocalPlayer.PlayerGui);
 local Mouse: Mouse = LocalPlayer:GetMouse();
 local CurrentCamera: Camera? = cloneref(workspace.CurrentCamera);
 
@@ -5160,7 +5161,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			Property = "Color"
 		});
 
-		UICorner.CornerRadius = UDim.new(1, 0)
+		UICorner.CornerRadius = UDim.new(0, 4)
 		UICorner.Parent = SliderBar
 
 		SliderInput.Name = Compkiller:_RandomString()
@@ -5170,7 +5171,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		SliderInput.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		SliderInput.BorderSizePixel = 0
 		SliderInput.Position = UDim2.new(0, 0, 0.5, 0)
-		SliderInput.Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.045), 0, 1, 0)
+		SliderInput.Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.08), 0, 1, 0)
 		SliderInput.ZIndex = Zindex + 4
 
 		table.insert(Compkiller.Elements.Highlight,{
@@ -5178,19 +5179,17 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			Property = "BackgroundColor3"
 		});
 
-		UICorner_2.CornerRadius = UDim.new(1, 0)
+		UICorner_2.CornerRadius = UDim.new(0, 4)
 		UICorner_2.Parent = SliderInput
 
-		-- Simple round knob (same shape/approach as the toggle switch's dot)
-		-- centered on the fill's right edge, sized/positioned so it always
-		-- stays inside SliderBar's clip bounds instead of floating past them.
 		Frame.Parent = SliderInput
-		Frame.AnchorPoint = Vector2.new(0.5, 0.5)
+		Frame.AnchorPoint = Vector2.new(1, 0.5)
 		Frame.BackgroundColor3 = Compkiller.Colors.SwitchColor
 		Frame.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		Frame.BorderSizePixel = 0
-		Frame.Position = UDim2.new(1, 0, 0.5, 0)
-		Frame.Size = UDim2.new(0.7, 0, 0.7, 0)
+		Frame.Position = UDim2.new(1, 2, 0.5, 0)
+		Frame.Rotation = 45.000
+		Frame.Size = UDim2.new(1.15, 0, 1.15, 0)
 		Frame.SizeConstraint = Enum.SizeConstraint.RelativeYY
 		Frame.ZIndex = Zindex + 6
 
@@ -5199,7 +5198,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			Property = 'BackgroundColor3'
 		});
 
-		UICorner_3.CornerRadius = UDim.new(1, 0)
+		UICorner_3.CornerRadius = UDim.new(3, 0)
 		UICorner_3.Parent = Frame
 
 		UIScale:Destroy()
@@ -5258,7 +5257,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			local Size = (Value - Config.Min) / (Config.Max - Config.Min);
 
 			TweenService:Create(SliderInput , TweenInfo.new(0.2),{
-				Size = UDim2.new(math.clamp(Size,0.045,1), 0, 1, 0)
+				Size = UDim2.new(math.clamp(Size,0.08,1), 0, 1, 0)
 			}):Play();
 
 			Config.Default = Value;
@@ -5315,7 +5314,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			ValueText.Text = tostring(Config.Default)..tostring(Config.Type)
 
 			Compkiller:_Animation(SliderInput, TweenInfo.new(0.35),{
-				Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.045), 0, 1, 0)
+				Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.08), 0, 1, 0)
 			});
 
 			Config.Callback(Value);
@@ -5332,7 +5331,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		Args.Signal = Signal:Connect(function(bool)
 			if bool then
 				Compkiller:_Animation(SliderInput, TweenInfo.new(0.35),{
-					Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.045), 0, 1, 0)
+					Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.08), 0, 1, 0)
 				});
 
 				Compkiller:_Animation(ValueText,Tween,{
@@ -6471,7 +6470,7 @@ function Compkiller.new(Config : Window)
 	end);
 
 	CompKiller.Name = "u?name=compkiller_?"..Compkiller:_RandomString();
-	CompKiller.Parent = RealCoreGui;
+	CompKiller.Parent = CoreGui;
 	CompKiller.ResetOnSpawn = false
 	CompKiller.IgnoreGuiInset = true;
 	CompKiller.ZIndexBehavior = Enum.ZIndexBehavior.Global;
@@ -11819,7 +11818,7 @@ function Compkiller:Loader(IconId,Duration)
 	local CompKiller = Instance.new("ScreenGui")
 
 	CompKiller.Name = Compkiller:_RandomString()
-	CompKiller.Parent = RealCoreGui
+	CompKiller.Parent = CoreGui
 	CompKiller.Enabled = true
 	CompKiller.ResetOnSpawn = false
 	CompKiller.IgnoreGuiInset = true
@@ -11930,7 +11929,7 @@ function Compkiller.newNotify()
 	local UIListLayout = Instance.new("UIListLayout")
 
 	Notification.Name = Compkiller:_RandomString()
-	Notification.Parent = RealCoreGui;
+	Notification.Parent = CoreGui;
 	Notification.ResetOnSpawn = false
 	Notification.ZIndexBehavior = Enum.ZIndexBehavior.Global
 	Notification.DisplayOrder = 2147483647
