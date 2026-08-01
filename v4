@@ -5181,14 +5181,16 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		UICorner_2.CornerRadius = UDim.new(1, 0)
 		UICorner_2.Parent = SliderInput
 
+		-- Simple round knob (same shape/approach as the toggle switch's dot)
+		-- centered on the fill's right edge, sized/positioned so it always
+		-- stays inside SliderBar's clip bounds instead of floating past them.
 		Frame.Parent = SliderInput
-		Frame.AnchorPoint = Vector2.new(1, 0.5)
+		Frame.AnchorPoint = Vector2.new(0.5, 0.5)
 		Frame.BackgroundColor3 = Compkiller.Colors.SwitchColor
 		Frame.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		Frame.BorderSizePixel = 0
-		Frame.Position = UDim2.new(1, 5, 0.5, 0)
-		Frame.Rotation = 45.000
-		Frame.Size = UDim2.new(1.3, 0, 1.3, 0)
+		Frame.Position = UDim2.new(1, 0, 0.5, 0)
+		Frame.Size = UDim2.new(0.7, 0, 0.7, 0)
 		Frame.SizeConstraint = Enum.SizeConstraint.RelativeYY
 		Frame.ZIndex = Zindex + 6
 
@@ -5197,7 +5199,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			Property = 'BackgroundColor3'
 		});
 
-		UICorner_3.CornerRadius = UDim.new(3, 0)
+		UICorner_3.CornerRadius = UDim.new(1, 0)
 		UICorner_3.Parent = Frame
 
 		UIScale:Destroy()
