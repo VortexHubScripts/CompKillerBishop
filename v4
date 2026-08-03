@@ -3870,7 +3870,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			IsBinding = false;
 
-			Config.Callback(KeyName);
+			if Config.Callback then Config.Callback(KeyName); end;
 		end);
 
 		local Args = {};
@@ -3882,7 +3882,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			Keybind.SetValue(Config.Default);
 
-			Config.Callback(Config.Default);
+			if Config.Callback then Config.Callback(Config.Default); end;
 		end;
 
 		function Args:GetValue()
@@ -4004,7 +4004,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			ColorFrame.BackgroundColor3 = color;
 			ColorFrame.BackgroundTransparency = opc;
 
-			Config.Callback(Config.Default , Config.Transparency);
+			if Config.Callback then Config.Callback(Config.Default , Config.Transparency); end;
 		end);
 
 		ColorPicker:SetColor(Config.Default,Config.Transparency);
@@ -4022,7 +4022,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			ColorPicker:Update()
 
-			Config.Callback(value,opc);
+			if Config.Callback then Config.Callback(value,opc); end;
 		end;
 
 		function Args:GetValue()
@@ -4055,7 +4055,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			Toggle.ChangeValue(Config.Default);
 
-			Config.Callback(Config.Default);
+			if Config.Callback then Config.Callback(Config.Default); end;
 		end);
 
 		local Args = {};
@@ -4067,7 +4067,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			Toggle.ChangeValue(Config.Default);
 
-			task.spawn(Config.Callback, Config.Default);
+			if Config.Callback then task.spawn(Config.Callback, Config.Default); end;
 		end;
 
 		function Args:GetValue()
@@ -4674,7 +4674,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			Block:SetTransparency((Config.Default and 0.1) or 0.3);
 
-			Config.Callback(Config.Default);
+			if Config.Callback then Config.Callback(Config.Default); end;
 		end);
 
 		local Args = {};
@@ -4688,7 +4688,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			Block:SetTransparency((Config.Default and 0.1) or 0.3);
 
-			task.spawn(Config.Callback, Config.Default);
+			if Config.Callback then task.spawn(Config.Callback, Config.Default); end;
 		end;
 
 		Args.Signal = Signal:Connect(function(bool)
@@ -4781,7 +4781,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			IsBinding = false;
 
-			Config.Callback(KeyName);
+			if Config.Callback then Config.Callback(KeyName); end;
 		end);
 
 		local Args = {};
@@ -4801,7 +4801,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			Keybind.SetValue(Config.Default);
 
-			Config.Callback(Config.Default);
+			if Config.Callback then Config.Callback(Config.Default); end;
 		end;
 
 		Args.Signal = Signal:Connect(function(bool)
@@ -4851,7 +4851,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			ColorFrame.BackgroundColor3 = color;
 			ColorFrame.BackgroundTransparency = opc;
 
-			Config.Callback(Config.Default , Config.Transparency);
+			if Config.Callback then Config.Callback(Config.Default , Config.Transparency); end;
 		end);
 
 		ColorPicker:SetColor(Config.Default,Config.Transparency);
@@ -4868,7 +4868,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			ColorPicker:SetColor(value,opc);
 			ColorPicker:Update();
 
-			Config.Callback(value,opc);
+			if Config.Callback then Config.Callback(value,opc); end;
 		end;
 
 		function Args:SetText(str : string)
@@ -5002,7 +5002,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		end);
 
 		Compkiller:_Input(Frame,function()
-			Config.Callback();
+			if Config.Callback then Config.Callback(); end;
 		end);
 
 		local Args = {};
@@ -5257,7 +5257,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			ValueText.Text = tostring(Config.Default)..tostring(Config.Type)
 
-			Config.Callback(Value)
+			if Config.Callback then Config.Callback(Value); end;
 		end;
 
 		do
@@ -5310,7 +5310,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 				Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.08), 0, 1, 0)
 			});
 
-			Config.Callback(Value);
+			if Config.Callback then Config.Callback(Value); end;
 		end;
 
 		function Args:SetText(str : string)
@@ -5815,7 +5815,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 				TextBox_2.Text = tostring(value);
 
-				task.spawn(Config.Callback,value);
+				if Config.Callback then task.spawn(Config.Callback, value); end;
 
 				Config.Default = value;
 			else
@@ -5842,7 +5842,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			TextBox_2.Text = tostring(Config.Default);
 
-			Config.Callback(Value);
+			if Config.Callback then Config.Callback(Value); end;
 		end;
 
 		Args.Signal = Signal:Connect(function(bool)
@@ -6090,7 +6090,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			ValueText.Text = DaTabarser(Config.Default);
 
-			Config.Callback(Config.Default);
+			if Config.Callback then Config.Callback(Config.Default); end;
 		end);
 
 		repi.EventOut:Connect(function(v)
@@ -6119,7 +6119,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			repi:SetData(Config.Default,Config.Values,Config.Multi,true);
 
-			Config.Callback(Value);
+			if Config.Callback then Config.Callback(Value); end;
 		end;
 
 		function Args:SetText(str : string)
