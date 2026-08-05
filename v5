@@ -1516,6 +1516,24 @@ function Compkiller:_IsMouseOverFrame(Frame : Frame) : boolean
 	end;
 end;
 
+-- Shared dispatcher for "close on click outside" style widgets (dropdowns, option
+-- lists, etc). Each such widget used to register its own UserInputService.InputBegan
+-- connection; on a panel with ~200 interactive elements that meant the engine had to
+-- invoke a separate connection for every single click/touch anywhere in the game
+-- (including in-game combat clicks), which showed up as a dominant UIS:InputBeganChangedEnd
+-- cost in the profiler. Consolidating into one connection that loops a registry keeps
+-- the exact same per-widget logic (each registered watcher is the original closure body,
+-- unchanged) but cuts the number of engine-level connections from N down to 1.
+Compkiller._OutsideClickWatchers = {};
+
+UserInputService.InputBegan:Connect(function(Input)
+	if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+		for _, watcher in ipairs(Compkiller._OutsideClickWatchers) do
+			watcher();
+		end;
+	end;
+end);
+
 function Compkiller:_Rounding(num: number, numDecimalPlaces: number) : number
 	local mult: number = 10 ^ (numDecimalPlaces or 0);
 	return math.floor(num * mult + 0.5) / mult;
@@ -3069,11 +3087,9 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		end;
 	end)
 
-	UserInputService.InputBegan:Connect(function(Input)
-		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-			if not Compkiller:_IsMouseOverFrame(ColorPickerWindow) then
-				ToggleUI(false);
-			end;
+	table.insert(Compkiller._OutsideClickWatchers, function()
+		if not Compkiller:_IsMouseOverFrame(ColorPickerWindow) then
+			ToggleUI(false);
 		end;
 	end)
 
@@ -4217,12 +4233,10 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			ToggleUI(true);
 		end);
 
-		UserInputService.InputBegan:Connect(function(Input)
-			if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-				if Toggl and not Compkiller:_IsMouseOverFrame(ExtractElement) and not Compkiller:_IsMouseOverFrame(Element) then
-					ToggleUI(false);
-				end;
-			end
+		table.insert(Compkiller._OutsideClickWatchers, function()
+			if Toggl and not Compkiller:_IsMouseOverFrame(ExtractElement) and not Compkiller:_IsMouseOverFrame(Element) then
+				ToggleUI(false);
+			end;
 		end)
 
 		return Compkiller:_LoadElement(Elements , true , Signal)
@@ -4587,14 +4601,12 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	-- so the click handler doesn't immediately reopen the dropdown.
 	local _closedByInputBegan = false;
 
-	UserInputService.InputBegan:Connect(function(Input)
-		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-			if not Compkiller:_IsMouseOverFrame(DropdownWindow) then
-				if ToggleDb:GetValue() then
-					_closedByInputBegan = Compkiller:_IsMouseOverFrame(BaseParent);
-				end;
-				ToggleUI(false);
+	table.insert(Compkiller._OutsideClickWatchers, function()
+		if not Compkiller:_IsMouseOverFrame(DropdownWindow) then
+			if ToggleDb:GetValue() then
+				_closedByInputBegan = Compkiller:_IsMouseOverFrame(BaseParent);
 			end;
+			ToggleUI(false);
 		end;
 	end);
 
