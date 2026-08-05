@@ -1551,6 +1551,29 @@ UserInputService.InputBegan:Connect(function(Input)
 	end;
 end);
 
+-- Consolidated dispatcher for AutoKeybind triggers (the Hold/Toggle/On keybind
+-- panel attached to every AddToggle/AddSlider via _KeybindHandler). Each one
+-- used to open its own InputBegan+InputEnded connection — on a panel with
+-- 100+ keybindable elements that's 200+ live connections evaluated on every
+-- key press and mouse click in the game, same problem as the outside-click
+-- watchers above. One shared pair of connections + registry keeps identical
+-- per-keybind logic while cutting that down to 2.
+Compkiller._KeybindTriggers = {};
+
+UserInputService.InputBegan:Connect(function(Input, GameProcessed)
+	if GameProcessed then return end; -- e.g. typing in a textbox shouldn't fire keybinds
+
+	for _, trigger in ipairs(Compkiller._KeybindTriggers) do
+		trigger.Began(Input);
+	end;
+end);
+
+UserInputService.InputEnded:Connect(function(Input)
+	for _, trigger in ipairs(Compkiller._KeybindTriggers) do
+		trigger.Ended(Input);
+	end;
+end);
+
 function Compkiller:_Rounding(num: number, numDecimalPlaces: number) : number
 	local mult: number = 10 ^ (numDecimalPlaces or 0);
 	return math.floor(num * mult + 0.5) / mult;
@@ -1562,222 +1585,6 @@ function Compkiller:_Animation(Self: Instance , Info: TweenInfo , Property :{[K]
 	Tween:Play();
 
 	return Tween;
-end;
-
--- ===================== Keybind Capture & Conflict System =====================
--- Shared core used by every "click box, press a key" capture flow in the library
--- (per-toggle/slider auto-keybind, standalone AddKeybind elements, and the menu
--- toggle keybind). Centralizing this fixes bugs that existed in every duplicated
--- copy (the re-entrancy guard was declared but never actually set true, so
--- clicking the box twice stacked a second InputBegan:Wait() loop; there was no
--- way to cancel a capture; Escape got bound as a key instead of backing out)
--- and gives every flavor modifier combos + conflict detection for free.
-
-local MODIFIER_KEYCODE_NAMES = {
-	LeftControl = "Ctrl", RightControl = "Ctrl",
-	LeftShift = "Shift", RightShift = "Shift",
-	LeftAlt = "Alt", RightAlt = "Alt",
-};
-
--- Modifier keys currently held, e.g. {"Ctrl","Shift"}.
-function Compkiller:_GetHeldModifiers() : {string}
-	local mods = {};
-
-	if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl) then
-		table.insert(mods, "Ctrl");
-	end;
-
-	if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift) then
-		table.insert(mods, "Shift");
-	end;
-
-	if UserInputService:IsKeyDown(Enum.KeyCode.LeftAlt) or UserInputService:IsKeyDown(Enum.KeyCode.RightAlt) then
-		table.insert(mods, "Alt");
-	end;
-
-	return mods;
-end;
-
--- Builds the display/storage string for a bind, e.g. {"Ctrl"}, "E" -> "Ctrl+E".
-function Compkiller:_ComposeKeyName(mods : {string}, base : string) : string
-	if #mods == 0 then
-		return base;
-	end;
-
-	return table.concat(mods, "+") .. "+" .. base;
-end;
-
--- Splits a stored bind (string or legacy Enum.KeyCode) into {Mods, Base}.
-function Compkiller:_ParseKeyName(value)
-	local str = (typeof(value) == "string" and value) or (value and value.Name) or nil;
-
-	if not str then
-		return { Mods = {}, Base = nil };
-	end;
-
-	local parts = string.split(str, "+");
-	local Base = parts[#parts];
-	local Mods = {};
-
-	for i = 1, #parts - 1 do
-		Mods[parts[i]] = true;
-	end;
-
-	return { Mods = Mods, Base = Base };
-end;
-
--- True if two stored bind values refer to the exact same key + modifier set.
-function Compkiller:_KeyNamesMatch(a, b) : boolean
-	local pa, pb = Compkiller:_ParseKeyName(a), Compkiller:_ParseKeyName(b);
-
-	if not pa.Base or not pb.Base or pa.Base ~= pb.Base then
-		return false;
-	end;
-
-	for m in pairs(pa.Mods) do if not pb.Mods[m] then return false end end;
-	for m in pairs(pb.Mods) do if not pa.Mods[m] then return false end end;
-
-	return true;
-end;
-
--- True if `Input` matches a stored (possibly compound "Ctrl+E") bind value.
--- Requires an exact modifier match so "E" and "Ctrl+E" can be bound independently.
-function Compkiller:_IsKeybindMatch(Input, value) : boolean
-	if not value then return false end;
-
-	local parsed = Compkiller:_ParseKeyName(value);
-	if not parsed.Base then return false end;
-
-	local BaseMatches = false;
-
-	if Input.UserInputType == Enum.UserInputType.MouseButton1 then
-		BaseMatches = parsed.Base == "MouseLeft";
-	elseif Input.UserInputType == Enum.UserInputType.MouseButton2 then
-		BaseMatches = parsed.Base == "MouseRight";
-	elseif Input.KeyCode and Input.KeyCode ~= Enum.KeyCode.Unknown then
-		BaseMatches = Input.KeyCode.Name == parsed.Base;
-	end;
-
-	if not BaseMatches then return false end;
-
-	local HeldSet = {};
-	for _, m in ipairs(Compkiller:_GetHeldModifiers()) do HeldSet[m] = true end;
-
-	-- The base itself might be a modifier key (binding "Ctrl" alone) — don't
-	-- require it to also show up as a *held* modifier.
-	if MODIFIER_KEYCODE_NAMES[parsed.Base] then
-		HeldSet[MODIFIER_KEYCODE_NAMES[parsed.Base]] = nil;
-	end;
-
-	for m in pairs(parsed.Mods) do
-		if not HeldSet[m] then return false end;
-		HeldSet[m] = nil;
-	end;
-
-	-- Anything left over is an *extra* held modifier the bind didn't ask for.
-	return next(HeldSet) == nil;
-end;
-
--- ---- Conflict registry: per-Window map of capture-id -> {Name, Key} ----
-Compkiller._KeybindRegistry = {};
-
-function Compkiller:_KeybindRegistryFor(Window)
-	Compkiller._KeybindRegistry[Window] = Compkiller._KeybindRegistry[Window] or {};
-	return Compkiller._KeybindRegistry[Window];
-end;
-
--- Registers/updates a bind and re-evaluates conflicts across the whole window.
--- `OnConflict(conflictingNames)` fires for every registered bind whose conflict
--- state may have changed as a result (including this one). O(n^2) over the
--- window's bind count, which in practice is at most a few dozen.
-function Compkiller:_SyncKeybind(Window, id, Name, Key, OnConflict)
-	if not Window then return end;
-
-	local Registry = Compkiller:_KeybindRegistryFor(Window);
-	Registry[id] = { Name = Name, Key = Key, OnConflict = OnConflict };
-
-	for entryId, entry in pairs(Registry) do
-		local conflicts = {};
-
-		if entry.Key then
-			for otherId, other in pairs(Registry) do
-				if otherId ~= entryId and other.Key and Compkiller:_KeyNamesMatch(entry.Key, other.Key) then
-					table.insert(conflicts, other.Name or "Unnamed");
-				end;
-			end;
-		end;
-
-		if entry.OnConflict then entry.OnConflict(conflicts) end;
-	end;
-end;
-
-function Compkiller:_UnregisterKeybind(Window, id)
-	local Registry = Compkiller._KeybindRegistry[Window];
-	if Registry then Registry[id] = nil end;
-end;
-
--- Shared "click, then press a key" capture core. `State` is a small per-widget
--- table ({}) the caller owns; `Hooks`:
---   IsBlacklist(v) -> boolean
---   OnStart()                         -- capture began ("..." / listening state)
---   OnResolved(KeyName, RawSelected)  -- a bind was picked
---   OnCancel()                        -- Escape / 8s timeout / re-click cancelled it
--- Clicking the box again while it's already listening cancels the capture
--- instead of stacking a second listener underneath it.
-function Compkiller:_CaptureKeybind(State, Hooks)
-	if State.Capturing then
-		State.Token = nil;
-		State.Capturing = false;
-		if Hooks.OnCancel then Hooks.OnCancel() end;
-		return;
-	end;
-
-	local token = {};
-	State.Token = token;
-	State.Capturing = true;
-
-	if Hooks.OnStart then Hooks.OnStart() end;
-
-	task.spawn(function()
-		local Selected, Cancelled = nil, false;
-		local StartTime = os.clock();
-
-		while State.Token == token and not Selected and not Cancelled do
-			local Key = UserInputService.InputBegan:Wait();
-
-			if State.Token ~= token then
-				return; -- superseded by a newer capture or an explicit cancel
-			end;
-
-			if os.clock() - StartTime > 8 then
-				Cancelled = true;
-			elseif Key.KeyCode == Enum.KeyCode.Escape then
-				Cancelled = true;
-			elseif Key.KeyCode ~= Enum.KeyCode.Unknown then
-				if not (Hooks.IsBlacklist(Key.KeyCode) or Hooks.IsBlacklist(Key.KeyCode.Name)) then
-					local isModifierKey = MODIFIER_KEYCODE_NAMES[Key.KeyCode.Name] ~= nil;
-					local mods = (not isModifierKey) and Compkiller:_GetHeldModifiers() or {};
-
-					Selected = Compkiller:_ComposeKeyName(mods, Key.KeyCode.Name);
-				end;
-			elseif Key.UserInputType == Enum.UserInputType.MouseButton1 and not (Hooks.IsBlacklist(Enum.UserInputType.MouseButton1) or Hooks.IsBlacklist("MouseLeft")) then
-				Selected = Compkiller:_ComposeKeyName(Compkiller:_GetHeldModifiers(), "MouseLeft");
-			elseif Key.UserInputType == Enum.UserInputType.MouseButton2 and not (Hooks.IsBlacklist(Enum.UserInputType.MouseButton2) or Hooks.IsBlacklist("MouseRight")) then
-				Selected = Compkiller:_ComposeKeyName(Compkiller:_GetHeldModifiers(), "MouseRight");
-			end;
-		end;
-
-		if State.Token ~= token then return end;
-
-		State.Token = nil;
-		State.Capturing = false;
-
-		if Selected and not Cancelled then
-			if Hooks.OnResolved then Hooks.OnResolved(Selected) end;
-		else
-			if Hooks.OnCancel then Hooks.OnCancel() end;
-		end;
-	end);
 end;
 
 function Compkiller:_Input(Frame : Frame , Callback : () -> ()) : TextButton
@@ -2242,23 +2049,15 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 		};
 
 		local GetItem = function(item)
-			if not item then
+			if item then
+				if typeof(item) == 'EnumItem' then
+					return Keys[item.Name] or item.Name;
+				else
+					return Keys[tostring(item)] or tostring(item);
+				end;
+			else
 				return 'None';
 			end;
-
-			if typeof(item) == 'EnumItem' then
-				return Keys[item.Name] or item.Name;
-			end;
-
-			-- Compound binds ("Ctrl+E") get each segment translated on its own
-			-- so modifier segments still render as "LCtrl"-style friendly names.
-			local parts = string.split(tostring(item), "+");
-
-			for i, part in ipairs(parts) do
-				parts[i] = Keys[part] or part;
-			end;
-
-			return table.concat(parts, " + ");
 		end;
 
 		local Keybind = Instance.new("Frame")
@@ -2353,20 +2152,35 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 
 		Signal:Connect(ToggleUI);
 
-		local IsListening = false;
-		local HasConflict = false;
+		-- Visual "listening for input" state while a rebind is in progress —
+		-- pulses the stroke between the accent color and idle color so it's
+		-- obvious the box is actively capturing the next key press.
+		local Capturing = false;
 
-		local ApplyIdleColors = function()
-			Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
-				Color = (HasConflict and Compkiller.Colors.Risky) or Compkiller.Colors.HighStrokeColor,
-				Thickness = 1
-			});
+		local SetCapturing = function(bool)
+			Capturing = bool;
 
-			Compkiller:_Animation(TextLabel,TweenInfo.new(0.2),{
-				TextColor3 = (HasConflict and Compkiller.Colors.Risky) or Compkiller.Colors.SwitchColor
-			});
+			if bool then
+				task.spawn(function()
+					local Lit = false;
 
-			Keybind.BackgroundColor3 = Compkiller.Colors.DropColor;
+					while Capturing do
+						Lit = not Lit;
+
+						Compkiller:_Animation(UIStroke,TweenInfo.new(0.35,Enum.EasingStyle.Sine),{
+							Color = Lit and Compkiller.Colors.Highlight or Compkiller.Colors.HighStrokeColor,
+							Transparency = Lit and 0 or 0.5,
+						});
+
+						task.wait(0.35);
+					end;
+
+					Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
+						Color = Compkiller.Colors.HighStrokeColor,
+						Transparency = 0,
+					});
+				end);
+			end;
 		end;
 
 		return {
@@ -2375,35 +2189,7 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 
 				Update();
 			end,
-			-- Pulses the chip with the accent color while a capture is in
-			-- progress, so "listening for input" reads instantly at a glance.
-			SetListening = function(bool)
-				IsListening = bool;
-
-				if bool then
-					Compkiller:_Animation(Keybind,TweenInfo.new(0.15),{
-						BackgroundColor3 = Compkiller.Colors.Highlight,
-						BackgroundTransparency = 0.55
-					});
-
-					Compkiller:_Animation(UIStroke,TweenInfo.new(0.15),{
-						Color = Compkiller.Colors.Highlight,
-						Thickness = 1.3
-					});
-				else
-					ApplyIdleColors();
-				end;
-			end,
-			-- Tints the chip amber when another bind in the same window shares
-			-- this exact key + modifier combo. Purely informational — both
-			-- binds still fire.
-			SetConflict = function(bool)
-				HasConflict = bool;
-
-				if not IsListening then
-					ApplyIdleColors();
-				end;
-			end,
+			SetCapturing = SetCapturing,
 			Root = Keybind,
 		};
 	elseif Name == "Helper" then
@@ -3702,16 +3488,17 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 		Line.Name = Compkiller:_RandomString()
 		Line.Parent = Keyholder
 		Line.AnchorPoint = Vector2.new(1, 0.5)
-		Line.BackgroundColor3 = Compkiller.Colors.StrokeColor
+		Line.BackgroundColor3 = Compkiller.Colors.BGDBColor
 		Line.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		Line.BorderSizePixel = 0
 		Line.Position = UDim2.new(1, 0, 0.5, 0)
 		Line.Size = UDim2.new(0, 30, 1, 0)
 		Line.ZIndex = MainFrame.ZIndex + 4
 
-		-- Line's color is mode-driven (see ModeColors in SetType below), not
-		-- theme-driven, so it's deliberately NOT registered in Compkiller.Elements
-		-- for theme sync — a theme change shouldn't erase the mode badge color.
+		table.insert(Compkiller.Elements.BGDBColor,{
+			Element = Line,
+			Property = 'BackgroundColor3'
+		});
 
 		TypeLabel.Name = Compkiller:_RandomString()
 		TypeLabel.Parent = Line
@@ -3745,16 +3532,6 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 
 		UpdateScale();
 
-		-- Mode badges get a distinct color each so the HUD reads at a glance
-		-- without having to read the text: Off = neutral, Hold = amber (matches
-		-- the Risky warning color), Toggle = accent blue, On = success green.
-		local ModeColors = {
-			Off    = Compkiller.Colors.StrokeColor,
-			Hold   = Compkiller.Colors.Risky,
-			Toggle = Compkiller.Colors.Highlight,
-			On     = Color3.fromRGB(88, 211, 137),
-		};
-
 		local frame_ref = {};
 
 		function frame_ref:SetName(str: string)
@@ -3766,22 +3543,7 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 		function frame_ref:SetType(str: string)
 			TypeLabel.Text = str or TypeLabel.Text;
 
-			local color = ModeColors[TypeLabel.Text];
-			if color then
-				Compkiller:_Animation(Line,TweenInfo.new(0.2),{
-					BackgroundColor3 = color
-				});
-			end;
-
 			UpdateScale();
-		end;
-
-		-- Tints the row's name amber when its bound key collides with another
-		-- active keybind in the same window. Purely informational.
-		function frame_ref:SetConflict(bool)
-			Compkiller:_Animation(Label,TweenInfo.new(0.2),{
-				TextColor3 = (bool and Compkiller.Colors.Risky) or Compkiller.Colors.SwitchColor
-			});
 		end;
 
 		function frame_ref:SetVisible(v)
@@ -3993,12 +3755,6 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 	APIRef.Update = function()
 		KeybindFrame:SetName(APIRef.Name);
 		KeybindFrame:SetType(ModeEnum[APIRef.Mode]);
-
-		-- Keep the conflict registry's display name in sync with the "Name"
-		-- textbox below, since that's what actually shows up on the HUD.
-		if Flag.Key and Flag.Key.SetConflictName then
-			Flag.Key:SetConflictName(APIRef.Name);
-		end;
 	end
 
 	local ElementAPIs = Compkiller:_LoadElement(ElementObjs , true , KB_Signal , true);
@@ -4006,12 +3762,8 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 	Flag.Key = ElementAPIs:AddKeybind({
 		Name = "Key",
 		Default = APIRef.Keybind,
-		ConflictName = APIRef.Name,
 		Callback = function(v)
 			APIRef.Keybind = v;
-		end,
-		OnConflict = function(hasConflict)
-			KeybindFrame:SetConflict(hasConflict);
 		end,
 	});
 
@@ -4129,8 +3881,13 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 		end;
 	end);
 
-	UserInputService.InputBegan:Connect(function(Input,Typing)
-		if not Typing and APIRef.Mode ~= 1 and Compkiller:_IsKeybindMatch(Input, APIRef.Keybind) then
+	local function Matches(Input)
+		return Input.KeyCode.Name == APIRef.Keybind or Input.KeyCode == APIRef.Keybind or (Input.UserInputType == Enum.UserInputType.MouseButton1 and APIRef.Keybind == "MouseLeft") or (Input.UserInputType == Enum.UserInputType.MouseButton2 and APIRef.Keybind == "MouseRight");
+	end;
+
+	table.insert(Compkiller._KeybindTriggers, {
+		Began = function(Input)
+			if not APIRef.Keybind or not Matches(Input) then return end;
 
 			if APIRef.Mode == 2 or APIRef.Mode == 4 then
 				ElementAPI:SetValue(APIRef.On);
@@ -4141,19 +3898,17 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 					ElementAPI:SetValue(APIRef.On);
 				end;
 			end;
-		end;
-	end);
-
-	UserInputService.InputEnded:Connect(function(Input,Typing)
-		if APIRef.Mode ~= 1 and Compkiller:_IsKeybindMatch(Input, APIRef.Keybind) then
+		end,
+		Ended = function(Input)
+			if not APIRef.Keybind or not Matches(Input) then return end;
 
 			if APIRef.Mode == 2 then
 				ElementAPI:SetValue(APIRef.Off);
 			elseif APIRef.Mode == 4 then
 				ElementAPI:SetValue(APIRef.On);
 			end;
-		end;
-	end);
+		end,
+	});
 
 	return APIRef;
 end;
@@ -4180,32 +3935,57 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 		local Keybind = Value:AddLink('Keybind' , Config.Default);
 
+		local IsBinding = false;
+
 		local IsBlacklist = function(v)
 			return Config.Blacklist and (Config.Blacklist[v] or table.find(Config.Blacklist,v))
 		end;
 
-		local CaptureState = {};
-
 		Compkiller:_Input(Keybind.Root,function()
-			Compkiller:_CaptureKeybind(CaptureState, {
-				IsBlacklist = IsBlacklist,
-				OnStart = function()
-					Keybind.SetListening(true);
-					Keybind.SetValue("...");
-				end,
-				OnResolved = function(KeyName)
-					Config.Default = KeyName;
+			if IsBinding then
+				return;
+			end;
 
-					Keybind.SetListening(false);
-					Keybind.SetValue(KeyName);
+			IsBinding = true;
 
-					if Config.Callback then Config.Callback(KeyName); end;
-				end,
-				OnCancel = function()
-					Keybind.SetListening(false);
-					Keybind.SetValue(Config.Default);
-				end,
-			});
+			local Previous = Config.Default;
+
+			Keybind.SetValue("...");
+			Keybind.SetCapturing(true);
+
+			local Selected, Cancelled = nil, false;
+
+			while not Selected and not Cancelled do
+				local Key = UserInputService.InputBegan:Wait();
+
+				if Key.KeyCode == Enum.KeyCode.Escape then
+					Cancelled = true;
+				elseif Key.KeyCode ~= Enum.KeyCode.Unknown and not IsBlacklist(Key.KeyCode) and not IsBlacklist(Key.KeyCode.Name) then
+					Selected = Key.KeyCode;
+				else
+					if Key.UserInputType == Enum.UserInputType.MouseButton1 and not IsBlacklist(Enum.UserInputType.MouseButton1) and not IsBlacklist("MouseLeft") then
+						Selected = "MouseLeft";
+					elseif Key.UserInputType == Enum.UserInputType.MouseButton2 and not IsBlacklist(Enum.UserInputType.MouseButton2) and not IsBlacklist("MouseRight") then
+						Selected = "MouseRight";
+					end;
+				end;
+			end;
+
+			Keybind.SetCapturing(false);
+			IsBinding = false;
+
+			if Cancelled then
+				Keybind.SetValue(Previous);
+				return;
+			end;
+
+			local KeyName = (typeof(Selected) == "string" and Selected) or Selected.Name;
+
+			Config.Default = KeyName;
+
+			Keybind.SetValue(Selected);
+
+			if Config.Callback then Config.Callback(KeyName); end;
 		end);
 
 		local Args = {};
@@ -5071,12 +4851,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			Default = nil,
 			Flag = nil,
 			Callback = function() end;
-			Blacklist = {},
-			-- Internal-only, not part of the public Keybind type: lets callers
-			-- like the per-toggle auto-keybind panel register conflicts under
-			-- the feature's own name ("ESP") instead of this row's label ("Key").
-			ConflictName = nil,
-			OnConflict = nil,
+			Blacklist = {}
 		});
 
 		local Block = Compkiller:_CreateBlock(Signal);
@@ -5091,46 +4866,57 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		local Keybind = Block:AddLink('Keybind' , Config.Default);
 
+		local IsBinding = false;
+
 		local IsBlacklist = function(v)
 			return Config.Blacklist and (Config.Blacklist[v] or table.find(Config.Blacklist,v))
 		end;
 
-		local Window = Compkiller:_GetWindowFromElement(Parent);
-		local RegistryId = {};
-		local CaptureState = {};
-
-		local SyncConflicts = function()
-			Compkiller:_SyncKeybind(Window, RegistryId, Config.ConflictName or Config.Name, Config.Default, function(conflicts)
-				local hasConflict = #conflicts > 0;
-
-				Keybind.SetConflict(hasConflict);
-
-				if Config.OnConflict then Config.OnConflict(hasConflict, conflicts); end;
-			end);
-		end;
-
 		Compkiller:_Input(Keybind.Root,function()
-			Compkiller:_CaptureKeybind(CaptureState, {
-				IsBlacklist = IsBlacklist,
-				OnStart = function()
-					Keybind.SetListening(true);
-					Keybind.SetValue("...");
-				end,
-				OnResolved = function(KeyName)
-					Config.Default = KeyName;
+			if IsBinding then
+				return;
+			end;
 
-					Keybind.SetListening(false);
-					Keybind.SetValue(KeyName);
+			IsBinding = true;
 
-					SyncConflicts();
+			local Previous = Config.Default;
 
-					if Config.Callback then Config.Callback(KeyName); end;
-				end,
-				OnCancel = function()
-					Keybind.SetListening(false);
-					Keybind.SetValue(Config.Default);
-				end,
-			});
+			Keybind.SetValue("...");
+			Keybind.SetCapturing(true);
+
+			local Selected, Cancelled = nil, false;
+
+			while not Selected and not Cancelled do
+				local Key = UserInputService.InputBegan:Wait();
+
+				if Key.KeyCode == Enum.KeyCode.Escape then
+					Cancelled = true;
+				elseif Key.KeyCode ~= Enum.KeyCode.Unknown and not IsBlacklist(Key.KeyCode) and not IsBlacklist(Key.KeyCode.Name) then
+					Selected = Key.KeyCode;
+				else
+					if Key.UserInputType == Enum.UserInputType.MouseButton1 and not IsBlacklist(Enum.UserInputType.MouseButton1) and not IsBlacklist("MouseLeft") then
+						Selected = "MouseLeft";
+					elseif Key.UserInputType == Enum.UserInputType.MouseButton2 and not IsBlacklist(Enum.UserInputType.MouseButton2) and not IsBlacklist("MouseRight") then
+						Selected = "MouseRight";
+					end;
+				end;
+			end;
+
+			Keybind.SetCapturing(false);
+			IsBinding = false;
+
+			if Cancelled then
+				Keybind.SetValue(Previous);
+				return;
+			end;
+
+			local KeyName = typeof(Selected) == "string" and Selected or Selected.Name;
+
+			Config.Default = KeyName;
+
+			Keybind.SetValue(Selected);
+
+			if Config.Callback then Config.Callback(KeyName); end;
 		end);
 
 		local Args = {};
@@ -5150,17 +4936,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			Keybind.SetValue(Config.Default);
 
-			SyncConflicts();
-
 			if Config.Callback then Config.Callback(Config.Default); end;
-		end;
-
-		-- Lets internal callers (the auto-keybind panel) rename the conflict
-		-- identity when the user renames the feature, without renaming the row.
-		function Args:SetConflictName(name : string)
-			Config.ConflictName = name;
-
-			SyncConflicts();
 		end;
 
 		Args.Signal = Signal:Connect(function(bool)
@@ -5176,8 +4952,6 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		if Config.Flag then
 			Compkiller.Flags[Config.Flag] = Args;
 		end;
-
-		SyncConflicts();
 
 		return Args;
 	end;
@@ -11419,7 +11193,7 @@ function Compkiller.new(Config : Window)
 		end));
 
 		UserInputService.InputBegan:Connect(function(Input,Typing)
-			if not Typing and Compkiller:_IsKeybindMatch(Input, Config.Keybind) then
+			if not Typing and (Input.KeyCode == Config.Keybind or Input.KeyCode.Name == Config.Keybind) then
 				WindowArgs:_ToggleUI()
 			end;
 		end);
