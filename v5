@@ -4577,15 +4577,11 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	local _closedByInputBegan = false;
 
 	UserInputService.InputBegan:Connect(function(Input)
-		-- Fast-exit before any position math: this dropdown is closed the vast
-		-- majority of the time, and this listener fires on EVERY MouseButton1/
-		-- Touch InputBegan in the whole game (including in-game clicks that have
-		-- nothing to do with the UI) — with many dropdowns on a busy panel that
-		-- adds up to a real per-click cost if it isn't skipped immediately.
-		if not ToggleDb:GetValue() then return end;
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 			if not Compkiller:_IsMouseOverFrame(DropdownWindow) then
-				_closedByInputBegan = Compkiller:_IsMouseOverFrame(BaseParent);
+				if ToggleDb:GetValue() then
+					_closedByInputBegan = Compkiller:_IsMouseOverFrame(BaseParent);
+				end;
 				ToggleUI(false);
 			end;
 		end;
