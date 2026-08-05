@@ -1521,21 +1521,8 @@ function Compkiller:_Rounding(num: number, numDecimalPlaces: number) : number
 	return math.floor(num * mult + 0.5) / mult;
 end;
 
--- Tracks the most recent tween started on each instance so a new call can
--- cancel it first. Without this, rapid repeated calls (hover flicker, dropdown
--- state churn, etc.) pile up overlapping tweens that TweenService keeps
--- ticking every frame until they finish on their own — that pile-up is what
--- shows as a heavy "updateGenericTweens" cost in the profiler.
-local _activeTweens = setmetatable({}, { __mode = "k" });
-
 function Compkiller:_Animation(Self: Instance , Info: TweenInfo , Property :{[K] : V})
-	local prev = _activeTweens[Self];
-	if prev then
-		prev:Cancel();
-	end;
-
 	local Tween = TweenService:Create(Self , Info or TweenInfo.new(0.25) , Property);
-	_activeTweens[Self] = Tween;
 
 	Tween:Play();
 
