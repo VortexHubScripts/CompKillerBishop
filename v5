@@ -3738,16 +3738,16 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 	};
 
 	local ModeEnum = {
-		[1] = 'Off', -- disabled / off
-		[2] = "Hold",
-		[3] = "Toggle",
+		[1] = "Hold",
+		[2] = "Toggle",
+		[3] = 'Off', -- disabled / off
 		[4] = "On", -- alway on
 	};
 
 	local e_m = {
-		['Off'] = 1,
-		['Hold'] = 2,
-		['Toggle'] = 3,
+		['Hold'] = 1,
+		['Toggle'] = 2,
+		['Off'] = 3,
 		['On'] = 4,
 	};
 
@@ -3884,21 +3884,32 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 		APIRef.Update();
 	end;
 
-	APIRef.Thread = task.spawn(function()
-		while true do task.wait(0.25)
-			if APIRef.Mode ~= 1 then
-				if ElementAPI:GetValue() == APIRef.On then
-					KeybindFrame:SetVisible(true);
-				else
-					KeybindFrame:SetVisible(false);
-				end;
-
-				APIRef.Update();
-			else
+	-- Event-driven visibility: instead of polling every 0.25s per keybind
+	-- (N toggles = N threads, big Heartbeat cost), update only when the
+	-- element's value actually changes.
+	local _lastVisible = nil;
+	local _syncVisible = function()
+		if APIRef.Mode == 1 then
+			if _lastVisible ~= false then
+				_lastVisible = false;
 				KeybindFrame:SetVisible(false);
 			end;
+			return;
 		end;
-	end)
+		local wantVisible = (ElementAPI:GetValue() == APIRef.On);
+		if _lastVisible ~= wantVisible then
+			_lastVisible = wantVisible;
+			KeybindFrame:SetVisible(wantVisible);
+			APIRef.Update();
+		end;
+	end;
+
+	-- Hook the element's underlying signal so we re-check on every value change.
+	if ElementAPI.Signal and ElementAPI.Signal.Connect then
+		ElementAPI.Signal:Connect(function() _syncVisible(); end);
+	end;
+	APIRef.SyncVisible = _syncVisible;
+	_syncVisible();
 
 	Parent.InputEnded:Connect(function(Input,Typing)
 		if Input.UserInputType == Enum.UserInputType.MouseButton2 and not Typing then
@@ -7768,11 +7779,11 @@ function Compkiller.new(Config : Window)
 
 		UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(upd);
 
-		return task.defer(function()
-			while true do task.wait(2)
-				upd();
-			end;
-		end)
+		-- Initial sync (replaces the old task.defer poll loop). The
+		-- PropertyChangedSignal above handles every subsequent update, so
+		-- polling every 2s forever was pure Heartbeat dead weight.
+		task.defer(upd);
+		return;
 
 		--[[local Parent: ScrollingFrame = UilistLayout.Parent;
 
@@ -11203,43 +11214,48 @@ function Compkiller.new(Config : Window)
 			end);
 		end;
 
-		table.insert(WindowArgs.THREADS,task.spawn(function()
-			while true do task.wait(0.5)
-				-- Reassert Modal every tick while open: only the most-recently-set
-				-- Modal GuiObject wins input capture, so a Roblox system dialog
-				-- (teleport failed, etc) popping up AFTER the menu opens would
-				-- otherwise steal input back. Re-claiming it here wins that race.
+	table.insert(WindowArgs.THREADS,task.spawn(function()
+		-- Driven by state changes; only poll to reassert Modal (cheap) and to
+		-- refresh the close-button visibility. 2s cadence is plenty — the
+		-- expensive parts (tweens) are skipped when the state hasn't changed.
+		local _lastIsOpen, _lastMobileOpen = nil, nil;
+		while true do task.wait(2)
+			if WindowArgs.IsOpen then
+				pcall(function() MainFrame.Modal = true end);
+			end;
+
+			if _lastIsOpen == WindowArgs.IsOpen then
+				continue; -- nothing to update; skip the tween churn below
+			end;
+			_lastIsOpen = WindowArgs.IsOpen;
+
+			if Compkiller:_IsMobile() then
+				ToggleCloseUI(true);
+
 				if WindowArgs.IsOpen then
-					pcall(function() MainFrame.Modal = true end);
-				end;
+					Compkiller:_Animation(ImageLabel,TweenInfo.new(0.2),{
+						ImageTransparency = 0.35
+					});
 
-				if Compkiller:_IsMobile() then
-					ToggleCloseUI(true);
-
-					if WindowArgs.IsOpen then
-						Compkiller:_Animation(ImageLabel,TweenInfo.new(0.2),{
-							ImageTransparency = 0.35
-						});
-
-						ImageLabel:GetAttribute("Hover",false);
-					else
-						ImageLabel:GetAttribute("Hover",true);
-
-						Compkiller:_Animation(ImageLabel,TweenInfo.new(0.2),{
-							ImageTransparency = 0.1
-						});
-					end;
+					ImageLabel:GetAttribute("Hover",false);
 				else
-					local WatermarkHidden = WindowArgs._WatermarkRoot and not WindowArgs._WatermarkRoot.Visible;
+					ImageLabel:GetAttribute("Hover",true);
 
-					if not WindowArgs.IsOpen and not WatermarkHidden then
-						ToggleCloseUI(true);
-					else
-						ToggleCloseUI(false);
-					end
+					Compkiller:_Animation(ImageLabel,TweenInfo.new(0.2),{
+						ImageTransparency = 0.1
+					});
 				end;
-			end
-		end));
+			else
+				local WatermarkHidden = WindowArgs._WatermarkRoot and not WindowArgs._WatermarkRoot.Visible;
+
+				if not WindowArgs.IsOpen and not WatermarkHidden then
+					ToggleCloseUI(true);
+				else
+					ToggleCloseUI(false);
+				end
+			end;
+		end
+	end));
 
 		UserInputService.InputBegan:Connect(function(Input,Typing)
 			if not Typing and (Input.KeyCode == Config.Keybind or Input.KeyCode.Name == Config.Keybind) then
