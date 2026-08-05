@@ -376,6 +376,7 @@ local Compkiller = {
 		TabClose = 85,
 	},
 	PerformanceMode = false,
+	HideKeybindsUI = false,
 	WindowsNil = {},
 	NilFolder = Instance.new('Folder'),
 	ArcylicParent = CurrentCamera,
@@ -3369,6 +3370,16 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 
 	Ref.THREAD = task.spawn(function()
 		while true do task.wait()
+			if Compkiller.HideKeybindsUI then
+				Keybinds.Visible = false;
+
+				if Compkiller.PerformanceMode then
+					Compkiller:_SetNilP(Keybinds , nil);
+				end;
+
+				continue;
+			end;
+
 			Compkiller:_Animation(MainFrame,TweenInfo.new(0.4),{
 				Size = UDim2.new(1, 30, 1, UIListLayout.AbsoluteContentSize.Y + 1)
 			});
@@ -3767,10 +3778,15 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 		end,
 	});
 
+	-- Off/On used to be pickable modes too, but they overlapped confusingly with
+	-- the ON Value/OFF Value toggles below (an already-disabled or already-forced
+	-- keybind serves no purpose here) — only Hold/Toggle are exposed now. Off
+	-- stays as the internal pre-bind default (APIRef.Mode above) and On is kept
+	-- in ModeEnum/e_m purely so old saved configs with Mode 1 or 4 still load.
 	Flag.Mode = ElementAPIs:AddDropdown({
-		Name = "Mode",
+		Name = "",
 		Default = ModeEnum[APIRef.Mode],
-		Values = ModeEnum,
+		Values = {"Hold", "Toggle"},
 		Callback = function(v)
 			APIRef.Mode = e_m[v];
 
@@ -3786,6 +3802,13 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 			Default = APIRef.On,
 			Callback = function(v)
 				APIRef.On = v;
+
+				-- ON Value and OFF Value are opposite states of the same boolean
+				-- target, so both being true at once makes the mode meaningless.
+				-- Force the other one off whenever this one is switched on.
+				if v and Flag.Off then
+					Flag.Off:SetValue(false);
+				end;
 			end,
 		});
 
@@ -3794,6 +3817,10 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 			Default = APIRef.Off,
 			Callback = function(v)
 				APIRef.Off = v;
+
+				if v and Flag.On then
+					Flag.On:SetValue(false);
+				end;
 			end,
 		});
 	elseif ObjectType == "Number" then
@@ -11397,6 +11424,16 @@ function Compkiller.new(Config : Window)
 			Default = Config.Keybind,
 			Callback = function(key)
 				WindowArgs:SetMenuKey(key);
+			end,
+		});
+
+		-- Hide the floating "Keybinds" indicator panel (shows active Hold/Toggle
+		-- keybinds bound via each toggle/slider's AutoKeybind panel) --
+		ControlSection:AddToggle({
+			Name = "Hide Keybinds UI",
+			Default = Compkiller.HideKeybindsUI,
+			Callback = function(value)
+				Compkiller.HideKeybindsUI = value;
 			end,
 		});
 
