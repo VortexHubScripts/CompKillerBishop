@@ -1521,8 +1521,21 @@ function Compkiller:_Rounding(num: number, numDecimalPlaces: number) : number
 	return math.floor(num * mult + 0.5) / mult;
 end;
 
+-- Tracks the most recent tween started on each instance so a new call can
+-- cancel it first. Without this, rapid repeated calls (hover flicker, dropdown
+-- state churn, etc.) pile up overlapping tweens that TweenService keeps
+-- ticking every frame until they finish on their own — that pile-up is what
+-- shows as a heavy "updateGenericTweens" cost in the profiler.
+local _activeTweens = setmetatable({}, { __mode = "k" });
+
 function Compkiller:_Animation(Self: Instance , Info: TweenInfo , Property :{[K] : V})
+	local prev = _activeTweens[Self];
+	if prev then
+		prev:Cancel();
+	end;
+
 	local Tween = TweenService:Create(Self , Info or TweenInfo.new(0.25) , Property);
+	_activeTweens[Self] = Tween;
 
 	Tween:Play();
 
@@ -3870,7 +3883,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			IsBinding = false;
 
-			Config.Callback(KeyName);
+			if Config.Callback then Config.Callback(KeyName); end;
 		end);
 
 		local Args = {};
@@ -3882,7 +3895,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			Keybind.SetValue(Config.Default);
 
-			Config.Callback(Config.Default);
+			if Config.Callback then Config.Callback(Config.Default); end;
 		end;
 
 		function Args:GetValue()
@@ -4004,7 +4017,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			ColorFrame.BackgroundColor3 = color;
 			ColorFrame.BackgroundTransparency = opc;
 
-			Config.Callback(Config.Default , Config.Transparency);
+			if Config.Callback then Config.Callback(Config.Default , Config.Transparency); end;
 		end);
 
 		ColorPicker:SetColor(Config.Default,Config.Transparency);
@@ -4022,7 +4035,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			ColorPicker:Update()
 
-			Config.Callback(value,opc);
+			if Config.Callback then Config.Callback(value,opc); end;
 		end;
 
 		function Args:GetValue()
@@ -4055,7 +4068,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			Toggle.ChangeValue(Config.Default);
 
-			Config.Callback(Config.Default);
+			if Config.Callback then Config.Callback(Config.Default); end;
 		end);
 
 		local Args = {};
@@ -4067,7 +4080,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			Toggle.ChangeValue(Config.Default);
 
-			task.spawn(Config.Callback, Config.Default);
+			if Config.Callback then task.spawn(Config.Callback, Config.Default); end;
 		end;
 
 		function Args:GetValue()
@@ -4312,6 +4325,11 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 		ScrollingFrame.CanvasSize = UDim2.fromOffset(UIListLayout.AbsoluteContentSize.X,UIListLayout.AbsoluteContentSize.Y)
 	end);
 
+	-- Assigned after Values is declared below; computes the open height from the
+	-- value count because UIListLayout.AbsoluteContentSize is stale in the same
+	-- frame the items were rebuilt (caused freshly-rebuilt dropdowns to open ~10px tall).
+	local GetOpenHeight;
+
 	local ToggleUI = function(bool)
 		local IsSame = ToggleDb:GetValue() == bool;
 
@@ -4340,7 +4358,7 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 			Compkiller:_Animation(DropdownWindow,TweenInfo.new(0.2),{
 				BackgroundTransparency = 0,
 				Position = MainPosition,
-				Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, math.clamp(UIListLayout.AbsoluteContentSize.Y + 10,10 , 200))
+				Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, (GetOpenHeight and GetOpenHeight()) or math.clamp(UIListLayout.AbsoluteContentSize.Y + 10,10 , 200))
 			})
 
 			Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
@@ -4393,6 +4411,13 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	local Default = nil;
 	local Values = nil;
 	local IsMulti = false;
+
+	GetOpenHeight = function()
+		-- Each item is 20px tall with 10px list padding between items.
+		local n = (typeof(Values) == 'table' and #Values) or 0;
+		local computed = (n > 0 and (n * 20 + (n - 1) * 10)) or 0;
+		return math.clamp(math.max(computed, UIListLayout.AbsoluteContentSize.Y) + 10, 10, 200);
+	end;
 
 	local DrawButton = function()
 		local DropdownItem = Instance.new("Frame")
@@ -4460,6 +4485,8 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 		for i,v in next,  __signals do
 			v:Disconnect();
 		end;
+
+		table.clear(__signals);
 	end;
 
 	local IsDefault = function(v)
@@ -4563,11 +4590,15 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	local _closedByInputBegan = false;
 
 	UserInputService.InputBegan:Connect(function(Input)
+		-- Fast-exit before any position math: this dropdown is closed the vast
+		-- majority of the time, and this listener fires on EVERY MouseButton1/
+		-- Touch InputBegan in the whole game (including in-game clicks that have
+		-- nothing to do with the UI) — with many dropdowns on a busy panel that
+		-- adds up to a real per-click cost if it isn't skipped immediately.
+		if not ToggleDb:GetValue() then return end;
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 			if not Compkiller:_IsMouseOverFrame(DropdownWindow) then
-				if ToggleDb:GetValue() then
-					_closedByInputBegan = Compkiller:_IsMouseOverFrame(BaseParent);
-				end;
+				_closedByInputBegan = Compkiller:_IsMouseOverFrame(BaseParent);
 				ToggleUI(false);
 			end;
 		end;
@@ -4582,6 +4613,7 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 		if SpamUpdate then
 			ClearDropdown();
 			UpdateDropdown();
+			SpamUpdate = false;
 		end;
 
 		ToggleUI(true);
@@ -4659,7 +4691,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			Block:SetTransparency((Config.Default and 0.1) or 0.3);
 
-			Config.Callback(Config.Default);
+			if Config.Callback then Config.Callback(Config.Default); end;
 		end);
 
 		local Args = {};
@@ -4673,7 +4705,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			Block:SetTransparency((Config.Default and 0.1) or 0.3);
 
-			task.spawn(Config.Callback, Config.Default);
+			if Config.Callback then task.spawn(Config.Callback, Config.Default); end;
 		end;
 
 		Args.Signal = Signal:Connect(function(bool)
@@ -4766,7 +4798,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			IsBinding = false;
 
-			Config.Callback(KeyName);
+			if Config.Callback then Config.Callback(KeyName); end;
 		end);
 
 		local Args = {};
@@ -4786,7 +4818,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			Keybind.SetValue(Config.Default);
 
-			Config.Callback(Config.Default);
+			if Config.Callback then Config.Callback(Config.Default); end;
 		end;
 
 		Args.Signal = Signal:Connect(function(bool)
@@ -4836,7 +4868,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			ColorFrame.BackgroundColor3 = color;
 			ColorFrame.BackgroundTransparency = opc;
 
-			Config.Callback(Config.Default , Config.Transparency);
+			if Config.Callback then Config.Callback(Config.Default , Config.Transparency); end;
 		end);
 
 		ColorPicker:SetColor(Config.Default,Config.Transparency);
@@ -4853,7 +4885,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			ColorPicker:SetColor(value,opc);
 			ColorPicker:Update();
 
-			Config.Callback(value,opc);
+			if Config.Callback then Config.Callback(value,opc); end;
 		end;
 
 		function Args:SetText(str : string)
@@ -4987,7 +5019,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		end);
 
 		Compkiller:_Input(Frame,function()
-			Config.Callback();
+			if Config.Callback then Config.Callback(); end;
 		end);
 
 		local Args = {};
@@ -5139,7 +5171,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			Property = "Color"
 		});
 
-		UICorner.CornerRadius = UDim.new(0, 6)
+		UICorner.CornerRadius = UDim.new(0, 4)
 		UICorner.Parent = SliderBar
 
 		SliderInput.Name = Compkiller:_RandomString()
@@ -5149,7 +5181,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		SliderInput.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		SliderInput.BorderSizePixel = 0
 		SliderInput.Position = UDim2.new(0, 0, 0.5, 0)
-		SliderInput.Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.045), 0, 1, 0)
+		SliderInput.Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.08), 0, 1, 0)
 		SliderInput.ZIndex = Zindex + 4
 
 		table.insert(Compkiller.Elements.Highlight,{
@@ -5157,7 +5189,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			Property = "BackgroundColor3"
 		});
 
-		UICorner_2.CornerRadius = UDim.new(0, 6)
+		UICorner_2.CornerRadius = UDim.new(0, 4)
 		UICorner_2.Parent = SliderInput
 
 		Frame.Parent = SliderInput
@@ -5165,9 +5197,9 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		Frame.BackgroundColor3 = Compkiller.Colors.SwitchColor
 		Frame.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		Frame.BorderSizePixel = 0
-		Frame.Position = UDim2.new(1, 5, 0.5, 0)
+		Frame.Position = UDim2.new(1, 2, 0.5, 0)
 		Frame.Rotation = 45.000
-		Frame.Size = UDim2.new(1.3, 0, 1.3, 0)
+		Frame.Size = UDim2.new(1.15, 0, 1.15, 0)
 		Frame.SizeConstraint = Enum.SizeConstraint.RelativeYY
 		Frame.ZIndex = Zindex + 6
 
@@ -5235,14 +5267,14 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			local Size = (Value - Config.Min) / (Config.Max - Config.Min);
 
 			TweenService:Create(SliderInput , TweenInfo.new(0.2),{
-				Size = UDim2.new(math.clamp(Size,0.045,1), 0, 1, 0)
+				Size = UDim2.new(math.clamp(Size,0.08,1), 0, 1, 0)
 			}):Play();
 
 			Config.Default = Value;
 
 			ValueText.Text = tostring(Config.Default)..tostring(Config.Type)
 
-			Config.Callback(Value)
+			if Config.Callback then Config.Callback(Value); end;
 		end;
 
 		do
@@ -5292,10 +5324,10 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			ValueText.Text = tostring(Config.Default)..tostring(Config.Type)
 
 			Compkiller:_Animation(SliderInput, TweenInfo.new(0.35),{
-				Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.045), 0, 1, 0)
+				Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.08), 0, 1, 0)
 			});
 
-			Config.Callback(Value);
+			if Config.Callback then Config.Callback(Value); end;
 		end;
 
 		function Args:SetText(str : string)
@@ -5309,7 +5341,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		Args.Signal = Signal:Connect(function(bool)
 			if bool then
 				Compkiller:_Animation(SliderInput, TweenInfo.new(0.35),{
-					Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.045), 0, 1, 0)
+					Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.08), 0, 1, 0)
 				});
 
 				Compkiller:_Animation(ValueText,Tween,{
@@ -5800,7 +5832,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 				TextBox_2.Text = tostring(value);
 
-				task.spawn(Config.Callback,value);
+				if Config.Callback then task.spawn(Config.Callback, value); end;
 
 				Config.Default = value;
 			else
@@ -5827,7 +5859,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			TextBox_2.Text = tostring(Config.Default);
 
-			Config.Callback(Value);
+			if Config.Callback then Config.Callback(Value); end;
 		end;
 
 		Args.Signal = Signal:Connect(function(bool)
@@ -6075,7 +6107,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			ValueText.Text = DaTabarser(Config.Default);
 
-			Config.Callback(Config.Default);
+			if Config.Callback then Config.Callback(Config.Default); end;
 		end);
 
 		repi.EventOut:Connect(function(v)
@@ -6104,7 +6136,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			repi:SetData(Config.Default,Config.Values,Config.Multi,true);
 
-			Config.Callback(Value);
+			if Config.Callback then Config.Callback(Value); end;
 		end;
 
 		function Args:SetText(str : string)
@@ -6452,6 +6484,8 @@ function Compkiller.new(Config : Window)
 	CompKiller.ResetOnSpawn = false
 	CompKiller.IgnoreGuiInset = true;
 	CompKiller.ZIndexBehavior = Enum.ZIndexBehavior.Global;
+	CompKiller.DisplayOrder = 2147483647;
+	pcall(function() CompKiller.OnTopOfCoreBlur = true end);
 
 	Compkiller.ProtectGui(CompKiller);
 
@@ -6482,8 +6516,17 @@ function Compkiller.new(Config : Window)
 	MainFrame:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
 		if MainFrame.BackgroundTransparency > 0.9 then
 			MainFrame.Visible = false;
+			pcall(function() MainFrame.Modal = false end);
 		else
 			MainFrame.Visible = true;
+			-- Roblox's own system dialogs (teleport failed, etc.) set Modal = true
+			-- on themselves, which silently steals ALL input away from every GUI
+			-- behind them — regardless of DisplayOrder/ZIndex, since Modal capture
+			-- has nothing to do with render order. Claiming Modal ourselves while
+			-- the menu is open reclaims input focus so our own buttons/sliders
+			-- keep working even while one of those dialogs is up.
+			-- pcall'd: Modal isn't a valid GuiObject property on every client version.
+			pcall(function() MainFrame.Modal = true end);
 		end;
 	end)
 
@@ -9673,125 +9716,69 @@ function Compkiller.new(Config : Window)
 			end,
 		});
 
-		-- ── Color Presets ────────────────────────────────────────────────
-		local ColorPresetsSection = UITab:DrawSection({
-			Name     = "Color Presets",
-			Position = "left",
-		});
-
-		local PRESET_DIR       = "BishopHub/ColorPresets";
-		local _presetDropdown  = nil;
-		local _presetNameValue = "";
-
-		local function colorToTable(c)
-			return { r = c.R, g = c.G, b = c.B };
-		end;
-
-		local function tableToColor(t)
-			return Color3.new(t.r or 0, t.g or 0, t.b or 0);
-		end;
-
-		local function getPresetNames()
-			if not isfolder(PRESET_DIR) then return {} end;
-			local names = {};
-			for _, path in ipairs(listfiles(PRESET_DIR)) do
-				local n = path:match("([^/\\]+)%.json$");
-				if n then table.insert(names, n) end;
-			end;
-			return names;
-		end;
-
-		local function refreshPresetDropdown()
-			if not _presetDropdown then return end;
-			local names = getPresetNames();
-			if #names == 0 then names = { "(none)" } end;
-			pcall(function() _presetDropdown:SetValues(names) end);
-		end;
-
-		local _initPresetNames = getPresetNames();
-		if #_initPresetNames == 0 then _initPresetNames = { "(none)" } end;
-
-		_presetDropdown = ColorPresetsSection:AddDropdown({
-			Name    = "Select Preset",
-			Values  = _initPresetNames,
-			Default = _initPresetNames[1],
-		});
-
-		ColorPresetsSection:AddTextBox({
-			Name        = "Preset Name",
-			Default     = "",
-			Placeholder = "Enter name...",
-			Callback    = function(v) _presetNameValue = v end,
-		});
-
-		ColorPresetsSection:AddButton({
-			Name     = "Save Current Colors",
-			Callback = function()
-				local name = _presetNameValue;
-				if name == "" then return end;
-				pcall(function()
-					if not isfolder(PRESET_DIR) then makefolder(PRESET_DIR) end;
-					local hs = game:GetService("HttpService");
-					local data = {
-						Accent     = colorToTable(Compkiller.Colors.Highlight       or Color3.new(0,1,1)),
-						Background = colorToTable(Compkiller.Colors.BGDBColor       or Color3.new()),
-						BlockBG    = colorToTable(Compkiller.Colors.BlockBackground or Color3.new()),
-						Block      = colorToTable(Compkiller.Colors.BlockColor      or Color3.new()),
-						Dropdown   = colorToTable(Compkiller.Colors.DropColor       or Color3.new()),
-						Border     = colorToTable(Compkiller.Colors.StrokeColor     or Color3.new()),
-						HighBorder = colorToTable(Compkiller.Colors.HighStrokeColor or Color3.new()),
-						Separator  = colorToTable(Compkiller.Colors.LineColor       or Color3.new()),
-						Text       = colorToTable(Compkiller.Colors.SwitchColor     or Color3.new()),
-					};
-					writefile(PRESET_DIR .. "/" .. name .. ".json", hs:JSONEncode(data));
-				end);
-				refreshPresetDropdown();
-			end,
-		});
-
-		ColorPresetsSection:AddButton({
-			Name     = "Load Selected Preset",
-			Callback = function()
-				local sel;
-				pcall(function() sel = _presetDropdown:GetValue() end);
-				if not sel or sel == "(none)" then return end;
-				local path = PRESET_DIR .. "/" .. sel .. ".json";
-				if not isfile(path) then return end;
-				pcall(function()
-					local hs   = game:GetService("HttpService");
-					local data = hs:JSONDecode(readfile(path));
-					if not data then return end;
-					if data.Accent     then Compkiller:ChangeHighlightColor(tableToColor(data.Accent)) end;
-					if data.Background then applyColor("BGDBColor",       tableToColor(data.Background)) end;
-					if data.BlockBG    then applyColor("BlockBackground", tableToColor(data.BlockBG)) end;
-					if data.Block      then applyColor("BlockColor",      tableToColor(data.Block)) end;
-					if data.Dropdown   then applyColor("DropColor",       tableToColor(data.Dropdown)) end;
-					if data.Border     then applyColor("StrokeColor",     tableToColor(data.Border)) end;
-					if data.HighBorder then applyColor("HighStrokeColor", tableToColor(data.HighBorder)) end;
-					if data.Separator  then applyColor("LineColor",       tableToColor(data.Separator)) end;
-					if data.Text       then applyColor("SwitchColor",     tableToColor(data.Text)) end;
-					Compkiller:SetTheme("Custom");
-					if _configInitDone then
-						pcall(function() themeDropdown:SetValue("Custom") end);
-					end;
-				end);
-			end,
-		});
-
 		-- ── Controls ─────────────────────────────────────────────────────
 		local ControlsSection = UITab:DrawSection({
 			Name     = "Controls",
 			Position = "left",
 		});
 
-		ControlsSection:AddKeybind({
+		-- The menu toggle keybind is persisted in its OWN file (outside the
+		-- config system) so it stays the same no matter which config the
+		-- player loads. Config loads that carry a different UIToggleKeybind
+		-- value get overridden by the file right after the load finishes.
+		local KeybindFile = Compkiller:_Path(Compkiller._BaseDirectory or "Compkiller", "menu_keybind.txt");
+
+		local function readSavedMenuKey()
+			local ok, key = pcall(function()
+				if isfile(KeybindFile) then
+					return readfile(KeybindFile);
+				end;
+				return nil;
+			end);
+			if ok and type(key) == "string" and key ~= "" then
+				return key;
+			end;
+			return nil;
+		end;
+
+		local function writeSavedMenuKey(key)
+			pcall(function()
+				local dir = Compkiller._BaseDirectory or "Compkiller";
+				if not isfolder(dir) then
+					makefolder(dir);
+				end;
+				writefile(KeybindFile, tostring(key));
+			end);
+		end;
+
+		local savedMenuKey = readSavedMenuKey() or "LeftAlt";
+		pcall(function() WindowArgs:SetMenuKey(savedMenuKey) end);
+
+		local menuKeybind;
+		menuKeybind = ControlsSection:AddKeybind({
 			Name     = "Toggle Menu",
-			Default  = "LeftAlt",
+			Default  = savedMenuKey,
 			Flag     = "UIToggleKeybind",
 			Callback = function(key)
 				pcall(function() WindowArgs:SetMenuKey(key) end);
+				-- Only real user rebinds get saved — flags applied during a
+				-- config load must not overwrite the persistent keybind file.
+				if not Compkiller._IsLoadingConfig then
+					writeSavedMenuKey(key);
+				end;
 			end,
 		});
+
+		-- After every config load, re-assert the file-saved keybind so a
+		-- config with a different saved UIToggleKeybind can't change it.
+		table.insert(Compkiller._ConfigLoadedCallbacks, function()
+			task.defer(function()
+				local saved = readSavedMenuKey();
+				if saved then
+					pcall(function() menuKeybind:SetValue(saved) end);
+				end;
+			end);
+		end);
 
 		-- Uses Toggle() so the keybind can bring it back. SetVisible() would
 		-- disable the root ScreenGui, which Toggle() never re-enables.
@@ -9815,14 +9802,51 @@ function Compkiller.new(Config : Window)
 			end,
 		});
 
+		-- The consumer script may never call Window:Watermark(), which left
+		-- WindowArgs._WatermarkRoot nil and made this toggle a no-op. Create
+		-- a default watermark lazily (name + FPS + clock) the first time the
+		-- toggle is on, so it always has something real to show/hide.
+		local function ensureWatermark()
+			if WindowArgs._WatermarkRoot then return end;
+			pcall(function()
+				local wm = WindowArgs:Watermark();
+				wm:AddText({ Text = Config.Name, Icon = "shield" });
+				local fpsText  = wm:AddText({ Text = "FPS: --", Icon = "activity" });
+				local timeText = wm:AddText({ Text = os.date("%H:%M:%S"), Icon = "clock" });
+
+				table.insert(WindowArgs.THREADS, task.spawn(function()
+					while WindowArgs._WatermarkRoot and WindowArgs._WatermarkRoot.Parent do
+						local frames = 0;
+						local start = os.clock();
+						while os.clock() - start < 1 do
+							RunService.RenderStepped:Wait();
+							frames += 1;
+						end;
+						pcall(function()
+							fpsText:SetText("FPS: " .. frames);
+							timeText:SetText(os.date("%H:%M:%S"));
+						end);
+					end;
+				end));
+			end);
+		end;
+
 		ControlsSection:AddToggle({
 			Name     = "Watermark",
 			Flag     = "UIWatermark",
 			Default  = true,
 			Callback = function(v)
+				if v then
+					ensureWatermark();
+				end;
 				pcall(function() WindowArgs:SetWatermarkVisible(v) end);
 			end,
 		});
+
+		-- Toggles don't fire their callback on creation, so build the default
+		-- watermark now (Default = true). A config that saved UIWatermark=false
+		-- will simply hide it when it loads.
+		ensureWatermark();
 
 		ControlsSection:AddToggle({
 			Name     = "Rainbow Accent",
@@ -9847,15 +9871,10 @@ function Compkiller.new(Config : Window)
 			end,
 		});
 
-		ControlsSection:AddSlider({
-			Name     = "FPS Cap",
-			Flag     = "UIFpsCap",
-			Min      = 0,
-			Max      = 360,
-			Default  = 60,
-			Round    = 0,
-			Callback = function(v)
-				pcall(function() setfpscap(v) end);
+		ControlsSection:AddButton({
+			Name     = "Unload Script",
+			Callback = function()
+				WindowArgs:Unload();
 			end,
 		});
 
@@ -11019,6 +11038,14 @@ function Compkiller.new(Config : Window)
 
 		table.insert(WindowArgs.THREADS,task.spawn(function()
 			while true do task.wait(0.5)
+				-- Reassert Modal every tick while open: only the most-recently-set
+				-- Modal GuiObject wins input capture, so a Roblox system dialog
+				-- (teleport failed, etc) popping up AFTER the menu opens would
+				-- otherwise steal input back. Re-claiming it here wins that race.
+				if WindowArgs.IsOpen then
+					pcall(function() MainFrame.Modal = true end);
+				end;
+
 				if Compkiller:_IsMobile() then
 					ToggleCloseUI(true);
 
@@ -11036,7 +11063,9 @@ function Compkiller.new(Config : Window)
 						});
 					end;
 				else
-					if not WindowArgs.IsOpen then
+					local WatermarkHidden = WindowArgs._WatermarkRoot and not WindowArgs._WatermarkRoot.Visible;
+
+					if not WindowArgs.IsOpen and not WatermarkHidden then
 						ToggleCloseUI(true);
 					else
 						ToggleCloseUI(false);
@@ -11054,6 +11083,71 @@ function Compkiller.new(Config : Window)
 
 	function WindowArgs:SetMenuKey(new: string | Enum.KeyCode)
 		Config.Keybind = new;
+	end;
+
+	-- Register a callback that runs when the script is unloaded (before the
+	-- UI is destroyed). Consumers use this to kill loops/connections that
+	-- aren't driven by a toggle flag.
+	function WindowArgs:OnUnload(callback)
+		WindowArgs._UnloadCallbacks = WindowArgs._UnloadCallbacks or {};
+		table.insert(WindowArgs._UnloadCallbacks, callback);
+	end;
+
+	-- Full teardown: turns every enabled toggle off (firing its callback so
+	-- the feature cleans itself up), runs OnUnload hooks, then destroys every
+	-- GUI/thread the library created.
+	function WindowArgs:Unload()
+		if WindowArgs._Unloaded then return end;
+		WindowArgs._Unloaded = true;
+
+		-- 1) Flip every enabled toggle off so feature callbacks disable
+		--    themselves (ESP, farms, rainbow accent, etc.).
+		for _, flag in next, Compkiller.Flags do
+			pcall(function()
+				if flag:GetValue() == true then
+					flag:SetValue(false);
+				end;
+			end);
+		end;
+
+		-- 2) Consumer cleanup hooks.
+		for _, cb in next, WindowArgs._UnloadCallbacks or {} do
+			pcall(cb);
+		end;
+
+		-- 3) Kill the menu keybind listener + background threads.
+		Config.Keybind = nil;
+		for _, item in next, WindowArgs.THREADS do
+			if typeof(item) == "thread" then
+				pcall(task.cancel, item);
+			end;
+		end;
+
+		-- 4) Tear down the GUIs (watermark, notifications, main window).
+		pcall(function()
+			if WindowArgs._WatermarkRoot then
+				WindowArgs._WatermarkRoot:Destroy();
+				WindowArgs._WatermarkRoot = nil;
+			end;
+		end);
+
+		pcall(function()
+			if Compkiller.NOTIFY_CACHE and Compkiller.NOTIFY_CACHE.Root then
+				Compkiller.NOTIFY_CACHE.Root:Destroy();
+			end;
+			Compkiller.NOTIFY_CACHE = nil;
+		end);
+
+		local index = table.find(Compkiller.Windows, CompKiller);
+		if index then
+			table.remove(Compkiller.Windows, index);
+		end;
+
+		if Compkiller.WindowSignals then
+			Compkiller.WindowSignals[CompKiller] = nil;
+		end;
+
+		pcall(function() CompKiller:Destroy() end);
 	end;
 
 	-- DrawSettings: populates the built-in UserSettings panel (opened via avatar click)
@@ -11443,6 +11537,10 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 		Config = "Software"
 	});
 
+	-- Remember the base directory so per-user global settings that must
+	-- survive config switches (e.g. the menu toggle keybind) have a home.
+	Compkiller._BaseDirectory = ConfigManager.Directory;
+
 	if not isfolder(ConfigManager.Directory) then
 		makefolder(ConfigManager.Directory);
 	end;
@@ -11753,6 +11851,8 @@ function Compkiller:Loader(IconId,Duration)
 	CompKiller.ResetOnSpawn = false
 	CompKiller.IgnoreGuiInset = true
 	CompKiller.ZIndexBehavior = Enum.ZIndexBehavior.Global
+	CompKiller.DisplayOrder = 2147483647
+	pcall(function() CompKiller.OnTopOfCoreBlur = true end)
 
 	local Loader = Instance.new("Frame")
 	local Icon = Instance.new("ImageLabel")
@@ -11861,6 +11961,8 @@ function Compkiller.newNotify()
 	Notification.Parent = CoreGui;
 	Notification.ResetOnSpawn = false
 	Notification.ZIndexBehavior = Enum.ZIndexBehavior.Global
+	Notification.DisplayOrder = 2147483647
+	pcall(function() Notification.OnTopOfCoreBlur = true end)
 
 	NotifyContainer.Name = Compkiller:_RandomString()
 	NotifyContainer.Parent = Notification
@@ -11881,6 +11983,7 @@ function Compkiller.newNotify()
 	local LayoutREF = 0;
 
 	Compkiller.NOTIFY_CACHE = {
+		Root = Notification,
 		new = function(Notify: Notify) : NotifyPayback
 			if Compkiller.NotificationsEnabled == false then return {} end;
 
