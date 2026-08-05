@@ -1753,16 +1753,20 @@ function Compkiller:Drag(InputFrame: Frame, MoveFrame: Frame, Speed : number)
 	local dragToggle: boolean = false;
 	local dragStart: Vector3 = nil;
 	local startPos: UDim2 = nil;
-	local Tween = TweenInfo.new(Speed);
 
+	-- Previously this tweened MoveFrame to the new position on every single
+	-- InputChanged event. Mouse-move fires far more often than once per frame,
+	-- so each move spawned a brand new TweenService tween that immediately
+	-- superseded the still-running previous one — the frame was perpetually
+	-- chasing a moving target through dozens of abandoned partial tweens,
+	-- which is what read as "laggy"/rubber-banding while dragging. Setting
+	-- Position directly makes the drag track the cursor 1:1 with no lag.
 	local updateInput = function(input)
 		local delta = input.Position - dragStart;
 		local position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
 			startPos.Y.Scale, startPos.Y.Offset + delta.Y);
 
-		Compkiller:_Animation(MoveFrame,Tween,{
-			Position = position
-		});
+		MoveFrame.Position = position;
 	end;
 
 	InputFrame.InputBegan:Connect(function(input)
@@ -3975,8 +3979,6 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			IsBinding = true;
 
-			local Previous = Config.Default;
-
 			Keybind.SetValue("...");
 			Keybind.SetCapturing(true);
 
@@ -4002,7 +4004,12 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			IsBinding = false;
 
 			if Cancelled then
-				Keybind.SetValue(Previous);
+				-- Leave the box showing "..." (unbound) instead of snapping back
+				-- to whatever was bound before — Escape clears the keybind.
+				Config.Default = nil;
+
+				if Config.Callback then Config.Callback(nil); end;
+
 				return;
 			end;
 
@@ -4906,8 +4913,6 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			IsBinding = true;
 
-			local Previous = Config.Default;
-
 			Keybind.SetValue("...");
 			Keybind.SetCapturing(true);
 
@@ -4933,7 +4938,12 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			IsBinding = false;
 
 			if Cancelled then
-				Keybind.SetValue(Previous);
+				-- Leave the box showing "..." (unbound) instead of snapping back
+				-- to whatever was bound before — Escape clears the keybind.
+				Config.Default = nil;
+
+				if Config.Callback then Config.Callback(nil); end;
+
 				return;
 			end;
 
@@ -9993,6 +10003,18 @@ function Compkiller.new(Config : Window)
 		-- will simply hide it when it loads.
 		ensureWatermark();
 
+		-- Hides the floating "Keybinds" indicator panel (_DrawKeybinds) that
+		-- lists any currently-active Hold/Toggle keybind bound via a toggle's
+		-- or slider's AutoKeybind panel.
+		ControlsSection:AddToggle({
+			Name     = "Hide Keybinds UI",
+			Flag     = "UIHideKeybindsUI",
+			Default  = false,
+			Callback = function(v)
+				Compkiller.HideKeybindsUI = v;
+			end,
+		});
+
 		ControlsSection:AddToggle({
 			Name     = "Rainbow Accent",
 			Flag     = "UIRainbowAccent",
@@ -11424,16 +11446,6 @@ function Compkiller.new(Config : Window)
 			Default = Config.Keybind,
 			Callback = function(key)
 				WindowArgs:SetMenuKey(key);
-			end,
-		});
-
-		-- Hide the floating "Keybinds" indicator panel (shows active Hold/Toggle
-		-- keybinds bound via each toggle/slider's AutoKeybind panel) --
-		ControlSection:AddToggle({
-			Name = "Hide Keybinds UI",
-			Default = Compkiller.HideKeybindsUI,
-			Callback = function(value)
-				Compkiller.HideKeybindsUI = value;
 			end,
 		});
 
