@@ -4116,30 +4116,32 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 				if not IsSameValue then
 					ExtractElement.Position = DropPosition
+
+					Compkiller:_Animation(ExtractElement , Tween , {
+						Position = MainPosition,
+						BackgroundTransparency = 0,
+						Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y)
+					});
+
+					Compkiller:_Animation(UIStroke , Tween , {
+						Transparency = 0
+					});
 				end;
-
-				Compkiller:_Animation(ExtractElement , Tween , {
-					Position = MainPosition,
-					BackgroundTransparency = 0,
-					Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y)
-				});
-
-				Compkiller:_Animation(UIStroke , Tween , {
-					Transparency = 0
-				});
 
 			else
 				Signal:Fire(false);
 
-				Compkiller:_Animation(ExtractElement , Tween , {
-					Position = DropPosition,
-					BackgroundTransparency = 1,
-					Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y - 10)
-				});
+				if not IsSameValue then
+					Compkiller:_Animation(ExtractElement , Tween , {
+						Position = DropPosition,
+						BackgroundTransparency = 1,
+						Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y - 10)
+					});
 
-				Compkiller:_Animation(UIStroke , Tween , {
-					Transparency = 1
-				});
+					Compkiller:_Animation(UIStroke , Tween , {
+						Transparency = 1
+					});
+				end;
 			end;
 		end;
 
