@@ -1534,6 +1534,23 @@ UserInputService.InputBegan:Connect(function(Input)
 	end;
 end);
 
+-- Same idea as above, but for widgets whose outside-click check also cares about
+-- right-click (MouseButton2) — kept as a separate list/connection rather than adding
+-- MouseButton2 to the dispatcher above, since that dispatcher's existing watchers
+-- (dropdowns, color pickers) never fired on right-click before and shouldn't start now.
+-- This is the one every AddToggle/AddSlider's auto-attached keybind panel uses
+-- (see _KeybindHandler) — with 100+ toggles/sliders on a busy panel, this was by far
+-- the largest source of per-click InputBegan connections.
+Compkiller._OutsideClickWatchersRightClick = {};
+
+UserInputService.InputBegan:Connect(function(Input)
+	if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.MouseButton2 or Input.UserInputType == Enum.UserInputType.Touch then
+		for _, watcher in ipairs(Compkiller._OutsideClickWatchersRightClick) do
+			watcher();
+		end;
+	end;
+end);
+
 function Compkiller:_Rounding(num: number, numDecimalPlaces: number) : number
 	local mult: number = 10 ^ (numDecimalPlaces or 0);
 	return math.floor(num * mult + 0.5) / mult;
@@ -3598,27 +3615,40 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 
 	task.delay(0.1,refreshPF);
 
+	-- Starts at nil (not false) so the very first ToggleUI(false) call below —
+	-- which sets the frame's real initial closed state — always runs unguarded,
+	-- same as before this change. Only later redundant calls (e.g. re-closing an
+	-- already-closed panel on every outside click) get skipped.
+	local _kbLastState = nil;
+
 	local ToggleUI = function(bool)
+		local IsSame = _kbLastState == bool;
+		_kbLastState = bool;
+
 		if bool then
 			KeybindHandler.Position = UDim2.new(0,Parent.AbsolutePosition.X + 225,0,Parent.AbsolutePosition.Y)
 
-			Compkiller:_Animation(KeybindHandler,TweenInfo.new(0.25),{
-				BackgroundTransparency = 0,
-				Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y + 5)
-			});
+			if not IsSame then
+				Compkiller:_Animation(KeybindHandler,TweenInfo.new(0.25),{
+					BackgroundTransparency = 0,
+					Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y + 5)
+				});
 
-			Compkiller:_Animation(UIStroke,TweenInfo.new(0.3),{
-				Transparency = 0
-			});
+				Compkiller:_Animation(UIStroke,TweenInfo.new(0.3),{
+					Transparency = 0
+				});
+			end;
 		else
-			Compkiller:_Animation(KeybindHandler,TweenInfo.new(0.3),{
-				BackgroundTransparency = 1,
-				Size = UDim2.new(0, 225, 0, 0)
-			});
+			if not IsSame then
+				Compkiller:_Animation(KeybindHandler,TweenInfo.new(0.3),{
+					BackgroundTransparency = 1,
+					Size = UDim2.new(0, 225, 0, 0)
+				});
 
-			Compkiller:_Animation(UIStroke,TweenInfo.new(0.3),{
-				Transparency = 1
-			});
+				Compkiller:_Animation(UIStroke,TweenInfo.new(0.3),{
+					Transparency = 1
+				});
+			end;
 		end;
 	end;
 
@@ -3790,11 +3820,9 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 		end;
 	end);
 
-	UserInputService.InputBegan:Connect(function(Input)
-		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.MouseButton2 or Input.UserInputType == Enum.UserInputType.Touch then
-			if not Compkiller:_IsMouseOverFrame(Parent) and not Compkiller:_IsMouseOverFrame(KeybindHandler) then
-				KB_Signal:Fire(false);
-			end;
+	table.insert(Compkiller._OutsideClickWatchersRightClick, function()
+		if not Compkiller:_IsMouseOverFrame(Parent) and not Compkiller:_IsMouseOverFrame(KeybindHandler) then
+			KB_Signal:Fire(false);
 		end;
 	end);
 
