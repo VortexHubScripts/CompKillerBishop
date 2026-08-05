@@ -3885,8 +3885,12 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 	end;
 
 	-- Event-driven visibility: instead of polling every 0.25s per keybind
-	-- (N toggles = N threads, big Heartbeat cost), update only when the
-	-- element's value actually changes.
+	-- (N toggles = N threads, big Heartbeat cost), update only when something
+	-- actually changes. Two triggers:
+	--   1) the parent section's visibility Signal (tab/section show/hide)
+	--   2) the element's own value-changing callback chain — patched below
+	-- Both call the same cheap _syncVisible, which early-outs when the visible
+	-- state hasn't changed.
 	local _lastVisible = nil;
 	local _syncVisible = function()
 		if APIRef.Mode == 1 then
@@ -3904,9 +3908,11 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 		end;
 	end;
 
-	-- Hook the element's underlying signal so we re-check on every value change.
-	if ElementAPI.Signal and ElementAPI.Signal.Connect then
-		ElementAPI.Signal:Connect(function() _syncVisible(); end);
+	-- (1) section/tab visibility signal — Signal here is the Compkiller.__SIGNAL
+	-- table passed in by _LoadElement, which exposes :Connect. This replaces the
+	-- old "wake up every 0.25s forever" thread.
+	if Signal and Signal.Connect then
+		Signal:Connect(function() _syncVisible(); end);
 	end;
 	APIRef.SyncVisible = _syncVisible;
 	_syncVisible();
@@ -3933,12 +3939,14 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 
 			if APIRef.Mode == 2 or APIRef.Mode == 4 then
 				ElementAPI:SetValue(APIRef.On);
+				_syncVisible();
 			elseif APIRef.Mode == 3 then
 				if ElementAPI:GetValue() == APIRef.On then
 					ElementAPI:SetValue(APIRef.Off);
 				else
 					ElementAPI:SetValue(APIRef.On);
 				end;
+				_syncVisible();
 			end;
 		end,
 		Ended = function(Input)
@@ -3946,8 +3954,10 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 
 			if APIRef.Mode == 2 then
 				ElementAPI:SetValue(APIRef.Off);
+				_syncVisible();
 			elseif APIRef.Mode == 4 then
 				ElementAPI:SetValue(APIRef.On);
+				_syncVisible();
 			end;
 		end,
 	});
