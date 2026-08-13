@@ -3886,7 +3886,7 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 
 	APIRef.Thread = task.spawn(function()
 		while true do task.wait(0.25)
-			if APIRef.Mode ~= 1 then
+			if APIRef.Keybind and APIRef.Mode ~= 1 then
 				if ElementAPI:GetValue() == APIRef.On then
 					KeybindFrame:SetVisible(true);
 				else
