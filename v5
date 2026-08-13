@@ -3884,38 +3884,21 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 		APIRef.Update();
 	end;
 
-	-- Event-driven visibility: instead of polling every 0.25s per keybind
-	-- (N toggles = N threads, big Heartbeat cost), update only when something
-	-- actually changes. Two triggers:
-	--   1) the parent section's visibility Signal (tab/section show/hide)
-	--   2) the element's own value-changing callback chain — patched below
-	-- Both call the same cheap _syncVisible, which early-outs when the visible
-	-- state hasn't changed.
-	local _lastVisible = nil;
-	local _syncVisible = function()
-		if APIRef.Mode == 1 then
-			if _lastVisible ~= false then
-				_lastVisible = false;
+	APIRef.Thread = task.spawn(function()
+		while true do task.wait(0.25)
+			if APIRef.Mode ~= 1 then
+				if ElementAPI:GetValue() == APIRef.On then
+					KeybindFrame:SetVisible(true);
+				else
+					KeybindFrame:SetVisible(false);
+				end;
+
+				APIRef.Update();
+			else
 				KeybindFrame:SetVisible(false);
 			end;
-			return;
 		end;
-		local wantVisible = (ElementAPI:GetValue() == APIRef.On);
-		if _lastVisible ~= wantVisible then
-			_lastVisible = wantVisible;
-			KeybindFrame:SetVisible(wantVisible);
-			APIRef.Update();
-		end;
-	end;
-
-	-- (1) section/tab visibility signal — Signal here is the Compkiller.__SIGNAL
-	-- table passed in by _LoadElement, which exposes :Connect. This replaces the
-	-- old "wake up every 0.25s forever" thread.
-	if Signal and Signal.Connect then
-		Signal:Connect(function() _syncVisible(); end);
-	end;
-	APIRef.SyncVisible = _syncVisible;
-	_syncVisible();
+	end)
 
 	Parent.InputEnded:Connect(function(Input,Typing)
 		if Input.UserInputType == Enum.UserInputType.MouseButton2 and not Typing then
@@ -3939,14 +3922,12 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 
 			if APIRef.Mode == 2 or APIRef.Mode == 4 then
 				ElementAPI:SetValue(APIRef.On);
-				_syncVisible();
 			elseif APIRef.Mode == 3 then
 				if ElementAPI:GetValue() == APIRef.On then
 					ElementAPI:SetValue(APIRef.Off);
 				else
 					ElementAPI:SetValue(APIRef.On);
 				end;
-				_syncVisible();
 			end;
 		end,
 		Ended = function(Input)
@@ -3954,10 +3935,8 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 
 			if APIRef.Mode == 2 then
 				ElementAPI:SetValue(APIRef.Off);
-				_syncVisible();
 			elseif APIRef.Mode == 4 then
 				ElementAPI:SetValue(APIRef.On);
-				_syncVisible();
 			end;
 		end,
 	});
@@ -5938,6 +5917,27 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		TextBox_2.Text = Config.Default
 		TextBox_2.TextColor3 = Compkiller.Colors.SwitchColor
 		TextBox_2.TextSize = 11.000
+		TextBox_2.Selectable = false
+
+		-- Roblox's gamepad/console GUI navigation treats Space as the
+		-- "activate selected object" button. If GuiService has any
+		-- Selectable GuiObject focused (can happen on PC too, e.g. after
+		-- Tab-navigation), it intercepts the Space keystroke for that
+		-- system instead of letting it reach this focused TextBox, so the
+		-- space character never gets typed. Manually re-insert it when
+		-- that happens.
+		UserInputService.InputBegan:Connect(function(Input, GameProcessed)
+			if GameProcessed then return end
+			if Input.KeyCode ~= Enum.KeyCode.Space then return end
+			if not TextBox_2:IsFocused() then return end
+
+			local pos = TextBox_2.CursorPosition
+			if pos == -1 then pos = #TextBox_2.Text + 1 end
+
+			local text = TextBox_2.Text
+			TextBox_2.Text = text:sub(1, pos - 1) .. " " .. text:sub(pos)
+			TextBox_2.CursorPosition = pos + 1
+		end)
 
 		table.insert(Compkiller.Elements.SwitchColor,{
 			Element = TextBox_2,
@@ -7789,11 +7789,11 @@ function Compkiller.new(Config : Window)
 
 		UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(upd);
 
-		-- Initial sync (replaces the old task.defer poll loop). The
-		-- PropertyChangedSignal above handles every subsequent update, so
-		-- polling every 2s forever was pure Heartbeat dead weight.
-		task.defer(upd);
-		return;
+		return task.defer(function()
+			while true do task.wait(2)
+				upd();
+			end;
+		end)
 
 		--[[local Parent: ScrollingFrame = UilistLayout.Parent;
 
@@ -9062,12 +9062,32 @@ function Compkiller.new(Config : Window)
 			local _autoLoadName = nil;
 			local _activeName = nil;    -- most recently loaded config this session
 			local _filterText = "";     -- search filter
-			local AutoLoadPath = Compkiller:_Path(Configuration.Config.Directory, "__autoload");
+
+			-- Auto-load is keyed per Roblox account (UserId), not shared across
+			-- the whole machine. Without this, whichever config was last set to
+			-- auto-load would load for every account that signs into this same
+			-- executor workspace, forcing the user to re-toggle it every time
+			-- they switched accounts.
+			local AutoLoadPath = Compkiller:_Path(Configuration.Config.Directory, "__autoload_" .. tostring(LocalPlayer.UserId));
 
 			if isfile(AutoLoadPath) then
 				local ok, raw = pcall(readfile, AutoLoadPath);
 				if ok and raw and raw:byte() then
 					_autoLoadName = raw;
+				end;
+			else
+				-- One-time migration: adopt the old machine-wide auto-load
+				-- pointer (if any) for whichever account boots up first after
+				-- this update, then remove it so it can't leak into other
+				-- accounts' auto-load state.
+				local LegacyAutoLoadPath = Compkiller:_Path(Configuration.Config.Directory, "__autoload");
+				if isfile(LegacyAutoLoadPath) then
+					local ok, raw = pcall(readfile, LegacyAutoLoadPath);
+					if ok and raw and raw:byte() then
+						_autoLoadName = raw;
+						pcall(writefile, AutoLoadPath, raw);
+					end;
+					pcall(delfile, LegacyAutoLoadPath);
 				end;
 			end;
 
@@ -9079,8 +9099,8 @@ function Compkiller.new(Config : Window)
 				s = s:gsub("^%s+", ""):gsub("%s+$", "");
 				-- strip path separators and other bad chars
 				s = s:gsub("[/\\\"\'%c]", "");
-				-- never allow reserved name
-				if s == "__autoload" then s = ""; end;
+				-- never allow reserved name (incl. the per-account auto-load pointer files)
+				if s == "__autoload" or s:sub(1, 10) == "__autoload" then s = ""; end;
 				return s;
 			end;
 
@@ -9417,9 +9437,9 @@ function Compkiller.new(Config : Window)
 					local cfgInfo = v.Info or {};
 					local cfgName = v.Name;
 
-					-- Hide the internal autoload marker file, and apply search filter
+					-- Hide the internal autoload marker file(s), and apply search filter
 					local _skip = false;
-					if cfgName == "__autoload" then _skip = true; end;
+					if cfgName:sub(1, 10) == "__autoload" then _skip = true; end;
 					if (not _skip) and _filterText ~= "" and not string.find(string.lower(cfgName), _filterText, 1, true) then
 						_skip = true;
 					end;
@@ -11224,48 +11244,43 @@ function Compkiller.new(Config : Window)
 			end);
 		end;
 
-	table.insert(WindowArgs.THREADS,task.spawn(function()
-		-- Driven by state changes; only poll to reassert Modal (cheap) and to
-		-- refresh the close-button visibility. 2s cadence is plenty — the
-		-- expensive parts (tweens) are skipped when the state hasn't changed.
-		local _lastIsOpen, _lastMobileOpen = nil, nil;
-		while true do task.wait(2)
-			if WindowArgs.IsOpen then
-				pcall(function() MainFrame.Modal = true end);
-			end;
-
-			if _lastIsOpen == WindowArgs.IsOpen then
-				continue; -- nothing to update; skip the tween churn below
-			end;
-			_lastIsOpen = WindowArgs.IsOpen;
-
-			if Compkiller:_IsMobile() then
-				ToggleCloseUI(true);
-
+		table.insert(WindowArgs.THREADS,task.spawn(function()
+			while true do task.wait(0.5)
+				-- Reassert Modal every tick while open: only the most-recently-set
+				-- Modal GuiObject wins input capture, so a Roblox system dialog
+				-- (teleport failed, etc) popping up AFTER the menu opens would
+				-- otherwise steal input back. Re-claiming it here wins that race.
 				if WindowArgs.IsOpen then
-					Compkiller:_Animation(ImageLabel,TweenInfo.new(0.2),{
-						ImageTransparency = 0.35
-					});
-
-					ImageLabel:GetAttribute("Hover",false);
-				else
-					ImageLabel:GetAttribute("Hover",true);
-
-					Compkiller:_Animation(ImageLabel,TweenInfo.new(0.2),{
-						ImageTransparency = 0.1
-					});
+					pcall(function() MainFrame.Modal = true end);
 				end;
-			else
-				local WatermarkHidden = WindowArgs._WatermarkRoot and not WindowArgs._WatermarkRoot.Visible;
 
-				if not WindowArgs.IsOpen and not WatermarkHidden then
+				if Compkiller:_IsMobile() then
 					ToggleCloseUI(true);
+
+					if WindowArgs.IsOpen then
+						Compkiller:_Animation(ImageLabel,TweenInfo.new(0.2),{
+							ImageTransparency = 0.35
+						});
+
+						ImageLabel:GetAttribute("Hover",false);
+					else
+						ImageLabel:GetAttribute("Hover",true);
+
+						Compkiller:_Animation(ImageLabel,TweenInfo.new(0.2),{
+							ImageTransparency = 0.1
+						});
+					end;
 				else
-					ToggleCloseUI(false);
-				end
-			end;
-		end
-	end));
+					local WatermarkHidden = WindowArgs._WatermarkRoot and not WindowArgs._WatermarkRoot.Visible;
+
+					if not WindowArgs.IsOpen and not WatermarkHidden then
+						ToggleCloseUI(true);
+					else
+						ToggleCloseUI(false);
+					end
+				end;
+			end
+		end));
 
 		UserInputService.InputBegan:Connect(function(Input,Typing)
 			if not Typing and (Input.KeyCode == Config.Keybind or Input.KeyCode.Name == Config.Keybind) then
@@ -11854,7 +11869,8 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 			local Name = string.sub(v , #Args.Directory + 2);
 
 			-- Skip internal marker files that are not real configs
-			if Name ~= "__autoload" and Name ~= "" then
+			-- (per-account auto-load pointers are named "__autoload_<UserId>")
+			if Name ~= "" and Name:sub(1, 10) ~= "__autoload" then
 				table.insert(names , Name);
 			end;
 		end;
@@ -11868,8 +11884,8 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 		for i,v in next , listfiles(Args.Directory) do
 			local Name = string.sub(v , #Args.Directory + 2);
 
-			-- Skip the autoload marker and any other non-config files
-			if Name ~= "__autoload" and Name ~= "" then
+			-- Skip the autoload marker(s) and any other non-config files
+			if Name ~= "" and Name:sub(1, 10) ~= "__autoload" then
 				local Info = Args:ReadInfo(Name);
 
 				-- ReadInfo returns false for unreadable / non-JSON files;
@@ -11906,7 +11922,7 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 		local count = 0;
 		for i,v in next , listfiles(Args.Directory) do
 			local Name = string.sub(v , #Args.Directory + 2);
-			if Name ~= "__autoload" and Name ~= "" then
+			if Name ~= "" and Name:sub(1, 10) ~= "__autoload" then
 				count = count + 1;
 			end;
 		end;
