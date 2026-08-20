@@ -1575,6 +1575,50 @@ UserInputService.InputEnded:Connect(function(Input)
 	end;
 end);
 
+-- Same consolidation as the two dispatchers above, for _AddDragBlacklist (called
+-- once per control — sliders, buttons, tabs, sections, color pickers, dropdowns,
+-- textboxes, labels — effectively everything). Each call used to open its own
+-- global UserInputService.InputChanged connection that ran an AbsolutePosition/
+-- AbsoluteSize mouse-hit check on every mouse movement, not just clicks — with
+-- 150-300 controls on a busy panel this was a bigger source of per-frame/per-move
+-- cost than the InputBegan dispatchers above, since it fires on every mouse move,
+-- not just presses. One shared connection + registry, same per-widget logic.
+Compkiller._DragBlacklistWatchers = {};
+
+UserInputService.InputChanged:Connect(function()
+	for _, watcher in ipairs(Compkiller._DragBlacklistWatchers) do
+		watcher();
+	end;
+end);
+
+-- Same consolidation, for AddSlider's mouse-drag tracking. Each slider used to
+-- open its own global UserInputService.InputChanged connection to track mouse
+-- movement while its bar was held (the IsHold check already guarded the actual
+-- work, but the engine still had to invoke every slider's callback on every
+-- mouse move to even reach that check) — with 50-150 sliders on a busy panel
+-- this was another dominant per-move cost. One shared connection + registry,
+-- same per-slider IsHold-guarded logic.
+Compkiller._SliderDragWatchers = {};
+
+UserInputService.InputChanged:Connect(function(Input)
+	for _, watcher in ipairs(Compkiller._SliderDragWatchers) do
+		watcher(Input);
+	end;
+end);
+
+-- Same consolidation, for AddTextBox's Space-key re-insertion workaround (see
+-- the comment at its registration site). Each textbox used to open its own
+-- global UserInputService.InputBegan connection that fired on every keypress
+-- anywhere in the game just to check "is this Space and is MY textbox focused".
+-- One shared connection + registry, same per-textbox logic.
+Compkiller._TextBoxSpaceWatchers = {};
+
+UserInputService.InputBegan:Connect(function(Input, GameProcessed)
+	for _, watcher in ipairs(Compkiller._TextBoxSpaceWatchers) do
+		watcher(Input, GameProcessed);
+	end;
+end);
+
 function Compkiller:_Rounding(num: number, numDecimalPlaces: number) : number
 	local mult: number = 10 ^ (numDecimalPlaces or 0);
 	return math.floor(num * mult + 0.5) / mult;
@@ -1668,7 +1712,7 @@ function Compkiller:_AddDragBlacklist(Frame: Frame)
 		SET_BLACKLIST(false);
 	end);
 
-	UserInputService.InputChanged:Connect(function()
+	table.insert(Compkiller._DragBlacklistWatchers, function()
 		if not Compkiller:_IsMouseOverFrame(Frame) then
 			SET_BLACKLIST(false);
 		end
@@ -5452,7 +5496,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 				end
 			end)
 
-			UserInputService.InputChanged:Connect(function(Input)
+			table.insert(Compkiller._SliderDragWatchers, function(Input)
 				if IsHold then
 					if (Input.UserInputType == Enum.UserInputType.MouseMovement or Input.UserInputType == Enum.UserInputType.Touch)  then
 						if UserInputService.TouchEnabled then
@@ -5926,7 +5970,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		-- system instead of letting it reach this focused TextBox, so the
 		-- space character never gets typed. Manually re-insert it when
 		-- that happens.
-		UserInputService.InputBegan:Connect(function(Input, GameProcessed)
+		table.insert(Compkiller._TextBoxSpaceWatchers, function(Input, GameProcessed)
 			if GameProcessed then return end
 			if Input.KeyCode ~= Enum.KeyCode.Space then return end
 			if not TextBox_2:IsFocused() then return end
