@@ -3788,6 +3788,22 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 
 	KB_Signal:Connect(ToggleUI);
 
+	-- KeybindHandler's Size above is only (re)computed when the panel itself
+	-- opens/closes, not when content inside it changes size afterward — e.g.
+	-- the Mode dropdown expanding its own option list while this panel is
+	-- already open. That left KeybindHandler too short to actually contain
+	-- the expanded dropdown, so clicking an option (visually inside the
+	-- dropdown, but outside KeybindHandler's stale, too-small AbsoluteSize)
+	-- was read as an outside click by the watcher above and closed the whole
+	-- panel — the "selecting Toggle closes the keybind UI" bug. Keep the
+	-- panel's height live-synced to its actual content while it's open so
+	-- its hit-box always actually contains everything visibly inside it.
+	UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
+		if _kbLastState then
+			KeybindHandler.Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y + 5);
+		end;
+	end);
+
 	-- Simplified to just Key + Mode. On/Off used to be user-configurable (a
 	-- leftover from also supporting Slider elements here), but this handler is
 	-- Toggle-only now, so they're just the two boolean states — no UI needed.
