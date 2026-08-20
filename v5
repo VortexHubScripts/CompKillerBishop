@@ -4059,9 +4059,12 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			IsBinding = false;
 
 			if Cancelled then
-				-- Leave the box showing "..." (unbound) instead of snapping back
-				-- to whatever was bound before — Escape clears the keybind.
+				-- Escape clears the keybind rather than snapping back to whatever
+				-- was bound before — reflect that in the box (was left showing
+				-- "..." from capture start instead of "None").
 				Config.Default = nil;
+
+				Keybind.SetValue(nil);
 
 				if Config.Callback then Config.Callback(nil); end;
 
@@ -4993,9 +4996,12 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			IsBinding = false;
 
 			if Cancelled then
-				-- Leave the box showing "..." (unbound) instead of snapping back
-				-- to whatever was bound before — Escape clears the keybind.
+				-- Escape clears the keybind rather than snapping back to whatever
+				-- was bound before — reflect that in the box (was left showing
+				-- "..." from capture start instead of "None").
 				Config.Default = nil;
+
+				Keybind.SetValue(nil);
 
 				if Config.Callback then Config.Callback(nil); end;
 
