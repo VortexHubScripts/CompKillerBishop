@@ -3788,37 +3788,23 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 
 	KB_Signal:Connect(ToggleUI);
 
+	-- Simplified to just Key + Mode. On/Off used to be user-configurable (a
+	-- leftover from also supporting Slider elements here), but this handler is
+	-- Toggle-only now, so they're just the two boolean states — no UI needed.
+	-- The display name (shown in the on-screen keybinds list) is always the
+	-- toggle's own label; it used to be separately overridable but that's gone
+	-- too, along with the unused legacy Off/On-only modes (never reachable from
+	-- the dropdown, which only ever offered Hold/Toggle).
 	local APIRef = {
-		Name = ElementAPI:GetText()
+		Name = ElementAPI:GetText(),
+		Off = false,
+		On = true,
+		Keybind = nil,
+		Mode = 1, -- 1 = Hold, 2 = Toggle
 	};
 
-	local ModeEnum = {
-		[1] = "Hold",
-		[2] = "Toggle",
-		[3] = 'Off', -- disabled / off
-		[4] = "On", -- alway on
-	};
-
-	local e_m = {
-		['Hold'] = 1,
-		['Toggle'] = 2,
-		['Off'] = 3,
-		['On'] = 4,
-	};
-
-	if ObjectType == "Toggle" then
-		APIRef.Off = false;
-		APIRef.On = true;
-		APIRef.Keybind = nil;
-		APIRef.Mode = e_m.Off;
-
-
-	elseif ObjectType == "Number" then
-		APIRef.Off = 1;
-		APIRef.On = 0;
-		APIRef.Keybind = nil;
-		APIRef.Mode = e_m.Off;
-	end;
+	local ModeEnum = { [1] = "Hold", [2] = "Toggle" };
+	local e_m = { ['Hold'] = 1, ['Toggle'] = 2 };
 
 	local Flag = {};
 
@@ -3837,108 +3823,34 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 		end,
 	});
 
-	-- Off/On used to be pickable modes too, but they overlapped confusingly with
-	-- the ON Value/OFF Value toggles below (an already-disabled or already-forced
-	-- keybind serves no purpose here) — only Hold/Toggle are exposed now. Off
-	-- stays as the internal pre-bind default (APIRef.Mode above) and On is kept
-	-- in ModeEnum/e_m purely so old saved configs with Mode 1 or 4 still load.
 	Flag.Mode = ElementAPIs:AddDropdown({
 		Name = "",
 		Default = ModeEnum[APIRef.Mode],
 		Values = {"Hold", "Toggle"},
 		Callback = function(v)
 			APIRef.Mode = e_m[v];
-
-			if APIRef.Mode == 4 then
-				ElementAPI:SetValue(APIRef.On);
-			end;
 		end,
 	});
-
-	if ObjectType == "Toggle" then
-		Flag.On = ElementAPIs:AddToggle({
-			Name = "ON Value",
-			Default = APIRef.On,
-			Callback = function(v)
-				APIRef.On = v;
-
-				-- ON Value and OFF Value are opposite states of the same boolean
-				-- target, so both being true at once makes the mode meaningless.
-				-- Force the other one off whenever this one is switched on.
-				if v and Flag.Off then
-					Flag.Off:SetValue(false);
-				end;
-			end,
-		});
-
-		Flag.Off = ElementAPIs:AddToggle({
-			Name = "OFF Value",
-			Default = APIRef.Off,
-			Callback = function(v)
-				APIRef.Off = v;
-
-				if v and Flag.On then
-					Flag.On:SetValue(false);
-				end;
-			end,
-		});
-	elseif ObjectType == "Number" then
-		Flag.On = ElementAPIs:AddSlider({
-			Name = "ON Value",
-			Default = APIRef.On,
-			Min = ElementCFG.Min,
-			Round = ElementCFG.Round,
-			Max = ElementCFG.Max,
-			Type = ElementCFG.Type,
-			Callback = function(v)
-				APIRef.On = v;
-			end,
-		});
-
-		Flag.Off = ElementAPIs:AddSlider({
-			Name = "OFF Value",
-			Default = APIRef.Off,
-			Min = ElementCFG.Min,
-			Round = ElementCFG.Round,
-			Max = ElementCFG.Max,
-			Type = ElementCFG.Type,
-			Callback = function(v)
-				APIRef.Off = v;
-			end,
-		});
-	end;
-
-	Flag.ShowInKeybindList = ElementAPIs:AddTextBox({
-		Name = "Name",
-		Default = APIRef.Name,
-		Placeholder = "Keybind Name",
-		Callback = function(v)
-			APIRef.Name = v;
-		end,
-	})
 
 	function APIRef:GetSettings()
 		APIRef.Update();
 
 		return {
 			Key = APIRef.Keybind,
-			On = APIRef.On,
-			Off = APIRef.Off,
 			Mode = APIRef.Mode,
-			Name = APIRef.Name,
 		};
 	end;
 
 	function APIRef:LoadSettings(cfg : KeybindSettings)
-		Flag.ShowInKeybindList:SetValue(cfg.Name);
-		Flag.Off:SetValue(cfg.Off);
-		Flag.On:SetValue(cfg.On);
 		Flag.Mode:SetValue(ModeEnum[cfg.Mode]);
 		Flag.Key:SetValue(cfg.Key);
 
 		APIRef.Update();
 	end;
 
+	-- Suppress the "currently on" badge while in Hold mode: the value trivially
+	-- tracks the physical key state there, so the indicator is redundant and
+	-- only useful for Toggle mode (where the state persists after release).
 	APIRef.Thread = task.spawn(function()
 		while true do task.wait(0.25)
 			if APIRef.Keybind and APIRef.Mode ~= 1 then
@@ -3971,13 +3883,15 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 		return Input.KeyCode.Name == APIRef.Keybind or Input.KeyCode == APIRef.Keybind or (Input.UserInputType == Enum.UserInputType.MouseButton1 and APIRef.Keybind == "MouseLeft") or (Input.UserInputType == Enum.UserInputType.MouseButton2 and APIRef.Keybind == "MouseRight");
 	end;
 
+	-- Hold: on while the key is physically down, off the moment it's released.
+	-- Toggle: each press flips the current state; release does nothing.
 	table.insert(Compkiller._KeybindTriggers, {
 		Began = function(Input)
 			if not APIRef.Keybind or not Matches(Input) then return end;
 
-			if APIRef.Mode == 2 or APIRef.Mode == 4 then
+			if APIRef.Mode == 1 then -- Hold
 				ElementAPI:SetValue(APIRef.On);
-			elseif APIRef.Mode == 3 then
+			elseif APIRef.Mode == 2 then -- Toggle
 				if ElementAPI:GetValue() == APIRef.On then
 					ElementAPI:SetValue(APIRef.Off);
 				else
@@ -3988,10 +3902,8 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 		Ended = function(Input)
 			if not APIRef.Keybind or not Matches(Input) then return end;
 
-			if APIRef.Mode == 2 then
+			if APIRef.Mode == 1 then -- Hold
 				ElementAPI:SetValue(APIRef.Off);
-			elseif APIRef.Mode == 4 then
-				ElementAPI:SetValue(APIRef.On);
 			end;
 		end,
 	});
@@ -5630,11 +5542,9 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			Compkiller.Flags[Config.Flag] = Args;
 		end;
 
-		if not DisableStackKeybind then
-			local AutoKeybind = Compkiller:_KeybindHandler(Slider , "Number" , Args , Signal , Zindex , Config);
-
-			Args.AutoKeybind = AutoKeybind;
-		end;
+		-- Sliders no longer get an auto-keybind panel — Hold/Toggle only make
+		-- sense as boolean semantics (Toggle elements); a numeric slider has no
+		-- clean equivalent without reintroducing configurable On/Off values.
 
 		return Args;
 	end;
