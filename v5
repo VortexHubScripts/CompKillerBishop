@@ -2933,6 +2933,17 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 
 		Args.IsVisible = bool;
 
+		-- IsSame was computed but never checked, so this ran its full ~15-tween
+		-- animation sequence on every call regardless of whether anything was
+		-- actually changing — including every redundant ToggleUI(false) fired
+		-- by the outside-click watcher on EVERY click in the game (dropdowns/
+		-- color pickers register one of those each), even while already closed.
+		-- With dozens of color pickers in a busy panel that was hundreds of
+		-- no-op tweens created per click. Skip entirely when nothing changes,
+		-- matching the same guard already used by the AddToggle/AddSlider
+		-- keybind panel's ToggleUI above.
+		if IsSame then return end;
+
 		local MainPosition = UDim2.new(0,Button.AbsolutePosition.X + 95,0,Button.AbsolutePosition.Y + 65);
 		local DropPosition = UDim2.new(0,MainPosition.X.Offset,0,MainPosition.Y.Offset + 15);
 
