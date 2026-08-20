@@ -367,7 +367,7 @@ local CurrentCamera: Camera? = cloneref(workspace.CurrentCamera);
 
 local Compkiller = {
 	Version = '2.6',
-	Logo = "rbxassetid://120245531583106",
+	Logo = "rbxassetid://109405650424875",
 	Windows = {},
 	Scale = {
 		Window = UDim2.new(0, 485,0, 565),
@@ -6416,6 +6416,21 @@ function Compkiller:SetTheme(name)
 		};
 	elseif name == "Default" then
 		Compkiller.Colors = {
+			Highlight       = Color3.fromRGB(168, 85, 247),
+			Toggle          = Color3.fromRGB(138, 63, 210),
+			Risky           = Color3.fromRGB(255, 196, 48),
+			BGDBColor       = Color3.fromRGB(8, 6, 12),
+			BlockColor      = Color3.fromRGB(16, 12, 22),
+			StrokeColor     = Color3.fromRGB(45, 32, 62),
+			SwitchColor     = Color3.fromRGB(222, 210, 235),
+			DropColor       = Color3.fromRGB(12, 9, 18),
+			MouseEnter      = Color3.fromRGB(58, 40, 82),
+			BlockBackground = Color3.fromRGB(24, 17, 34),
+			LineColor       = Color3.fromRGB(40, 28, 58),
+			HighStrokeColor = Color3.fromRGB(58, 40, 84),
+		};
+	elseif name == "Classic Blue" then
+		Compkiller.Colors = {
 			Highlight       = Color3.fromRGB(88, 182, 255),
 			Toggle          = Color3.fromRGB(60, 150, 230),
 			Risky           = Color3.fromRGB(255, 196, 48),
@@ -6488,21 +6503,6 @@ function Compkiller:SetTheme(name)
 			["StrokeColor"] = Color3.fromRGB(50, 10, 10),
 			["SwitchColor"] = Color3.fromRGB(255, 220, 220),
 			["Toggle"] = Color3.fromRGB(160, 20, 20),
-		}
-	elseif name == "Void Purple" then
-		Compkiller.Colors = {
-			["Highlight"] = Color3.fromRGB(168, 85, 247),
-			["Toggle"] = Color3.fromRGB(138, 63, 210),
-			["Risky"] = Color3.fromRGB(255, 196, 48),
-			["BGDBColor"] = Color3.fromRGB(8, 6, 12),
-			["BlockColor"] = Color3.fromRGB(16, 12, 22),
-			["StrokeColor"] = Color3.fromRGB(45, 32, 62),
-			["SwitchColor"] = Color3.fromRGB(222, 210, 235),
-			["DropColor"] = Color3.fromRGB(12, 9, 18),
-			["MouseEnter"] = Color3.fromRGB(58, 40, 82),
-			["BlockBackground"] = Color3.fromRGB(24, 17, 34),
-			["LineColor"] = Color3.fromRGB(40, 28, 58),
-			["HighStrokeColor"] = Color3.fromRGB(58, 40, 84),
 		}
 	end;
 
@@ -9765,8 +9765,8 @@ function Compkiller.new(Config : Window)
 		themeDropdown = AppearanceSection:AddDropdown({
 			Name    = "Theme",
 			Flag    = "UITheme",
-			Default = "Void Purple",
-			Values  = { "Void Purple", "Default", "Dark Blue", "Dark Green", "Purple Rose", "Skeet", "Crimson Dark", "Custom" },
+			Default = "Default",
+			Values  = { "Default", "Classic Blue", "Dark Blue", "Dark Green", "Purple Rose", "Skeet", "Crimson Dark", "Custom" },
 			Callback = function(v)
 				pcall(function() Compkiller:SetTheme(v) end);
 			end,
@@ -11397,12 +11397,12 @@ function Compkiller.new(Config : Window)
 		end;
 
 		-- Theme selector --
-		local ThemeNames = {"Void Purple","Default","Dark Blue","Dark Green","Purple Rose","Skeet","Crimson Dark","Custom"};
+		local ThemeNames = {"Default","Classic Blue","Dark Blue","Dark Green","Purple Rose","Skeet","Crimson Dark","Custom"};
 
 		local ThemeDropdown = AppearanceSection:AddDropdown({
 			Name = "Theme",
 			Flag = "UI_Theme",
-			Default = "Void Purple",
+			Default = "Default",
 			Values = ThemeNames,
 			Callback = function(value)
 				if value ~= "Custom" then
