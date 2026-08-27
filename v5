@@ -9829,7 +9829,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Accent",
 			Flag     = "UIColorAccent",
-			Default  = Color3.fromRGB(88, 182, 255),
+			Default  = Compkiller.Colors.Highlight,
 			Callback = function(color)
 				switchToCustom();
 				pcall(function() Compkiller:ChangeHighlightColor(color) end);
@@ -9839,7 +9839,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Background",
 			Flag     = "UIColorBackground",
-			Default  = Color3.fromRGB(10, 12, 18),
+			Default  = Compkiller.Colors.BGDBColor,
 			Callback = function(color)
 				switchToCustom();
 				applyColor("BGDBColor", color);
@@ -9849,7 +9849,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Block BG",
 			Flag     = "UIColorBlockBG",
-			Default  = Color3.fromRGB(22, 27, 42),
+			Default  = Compkiller.Colors.BlockBackground,
 			Callback = function(color)
 				switchToCustom();
 				applyColor("BlockBackground", color);
@@ -9859,7 +9859,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Block",
 			Flag     = "UIColorBlock",
-			Default  = Color3.fromRGB(18, 21, 32),
+			Default  = Compkiller.Colors.BlockColor,
 			Callback = function(color)
 				switchToCustom();
 				applyColor("BlockColor", color);
@@ -9869,7 +9869,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Dropdown",
 			Flag     = "UIColorDropdown",
-			Default  = Color3.fromRGB(15, 18, 28),
+			Default  = Compkiller.Colors.DropColor,
 			Callback = function(color)
 				switchToCustom();
 				applyColor("DropColor", color);
@@ -9879,7 +9879,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Border",
 			Flag     = "UIColorBorder",
-			Default  = Color3.fromRGB(42, 50, 74),
+			Default  = Compkiller.Colors.StrokeColor,
 			Callback = function(color)
 				switchToCustom();
 				applyColor("StrokeColor", color);
@@ -9889,7 +9889,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Highlight Border",
 			Flag     = "UIColorHighBorder",
-			Default  = Color3.fromRGB(52, 63, 92),
+			Default  = Compkiller.Colors.HighStrokeColor,
 			Callback = function(color)
 				switchToCustom();
 				applyColor("HighStrokeColor", color);
@@ -9899,7 +9899,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Separator",
 			Flag     = "UIColorSeparator",
-			Default  = Color3.fromRGB(38, 46, 68),
+			Default  = Compkiller.Colors.LineColor,
 			Callback = function(color)
 				switchToCustom();
 				applyColor("LineColor", color);
@@ -9909,7 +9909,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Text",
 			Flag     = "UIColorText",
-			Default  = Color3.fromRGB(208, 218, 240),
+			Default  = Compkiller.Colors.SwitchColor,
 			Callback = function(color)
 				switchToCustom();
 				applyColor("SwitchColor", color);
