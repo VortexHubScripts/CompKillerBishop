@@ -4959,47 +4959,88 @@ function Compkiller:_RevealElement(ElementFrame: Frame, FallbackFrame: Frame)
 	end);
 end;
 
--- Single persistent search-icon button pinned to the window's own top-right
--- corner, so search is discoverable without knowing the Ctrl+K shortcut.
--- Parented once to MainFrame (not per-tab) so there's exactly one instance
--- that stays put and stays visible regardless of which tab is active —
--- called once from Compkiller.new right after TabMainFrame is set up.
+-- Single persistent search button in the blank strip at the bottom of the
+-- tab sidebar (below the tab list — the space Userinfo would occupy if it
+-- were parented in; see the "commented out" note on Userinfo.Parent above),
+-- so search is discoverable without knowing the Ctrl+K shortcut. Parented
+-- once to TabFrame (not per-tab) so there's exactly one instance that stays
+-- put and stays visible regardless of which tab is active — called once
+-- from Compkiller.new right after TabFrame's own chrome is set up.
 -- Wired to WindowArgs._OpenSearch, which the search overlay block near the
 -- end of Compkiller.new sets — by the time a user could ever click this
 -- (after Compkiller.new has returned) that assignment has already run.
-function Compkiller:_AddSearchButton(MainFrame: Frame, WindowArgs)
-	local SearchButton = Instance.new("ImageButton");
+-- Uses Compkiller:_Input (a real GuiButton overlay + MouseButton1Click)
+-- rather than a raw InputBegan connection, matching every other clickable
+-- row in this sidebar (TabButton, Userinfo) instead of the one-off pattern
+-- AddOption's gear uses.
+function Compkiller:_AddSearchButton(TabFrame: Frame, WindowArgs)
+	local Row = Instance.new("Frame");
+	local UICorner = Instance.new("UICorner");
+	local Icon = Instance.new("ImageLabel");
+	local Label = Instance.new("TextLabel");
 
-	SearchButton.Name = Compkiller:_RandomString();
-	SearchButton.Parent = MainFrame;
-	SearchButton.AnchorPoint = Vector2.new(1, 0);
-	SearchButton.BackgroundTransparency = 1;
-	SearchButton.Position = UDim2.new(1, -16, 0, 12);
-	SearchButton.Size = UDim2.new(0, 18, 0, 18);
-	SearchButton.ZIndex = MainFrame.ZIndex + 40;
-	SearchButton.Image = Compkiller:_GetIcon("search");
-	SearchButton.ImageColor3 = Compkiller.Colors.SwitchColor;
-	SearchButton.ImageTransparency = 0.5;
-	SearchButton.AutoButtonColor = false;
+	Row.Name = Compkiller:_RandomString();
+	Row.Parent = TabFrame;
+	Row.AnchorPoint = Vector2.new(0.5, 1);
+	Row.BackgroundColor3 = Color3.fromRGB(161, 161, 161);
+	Row.BackgroundTransparency = 1;
+	Row.BorderSizePixel = 0;
+	Row.Position = UDim2.new(0.5, 0, 1, -14);
+	Row.Size = UDim2.new(1, -20, 0, 30);
+	Row.ZIndex = 3;
+
+	UICorner.CornerRadius = UDim.new(0, 4);
+	UICorner.Parent = Row;
+
+	Icon.Name = Compkiller:_RandomString();
+	Icon.Parent = Row;
+	Icon.AnchorPoint = Vector2.new(0, 0.5);
+	Icon.BackgroundTransparency = 1;
+	Icon.Position = UDim2.new(0, 10, 0.5, 0);
+	Icon.Size = UDim2.new(0, 14, 0, 14);
+	Icon.ZIndex = 4;
+	Icon.Image = Compkiller:_GetIcon("search");
+	Icon.ImageColor3 = Compkiller.Colors.SwitchColor;
+	Icon.ImageTransparency = 0.5;
 
 	table.insert(Compkiller.Elements.SwitchColor, {
-		Element = SearchButton,
+		Element = Icon,
 		Property = "ImageColor3"
 	});
 
-	Compkiller:_Hover(SearchButton, function()
-		Compkiller:_Animation(SearchButton, TweenInfo.new(0.15), { ImageTransparency = 0 });
+	Label.Name = Compkiller:_RandomString();
+	Label.Parent = Row;
+	Label.AnchorPoint = Vector2.new(0, 0.5);
+	Label.BackgroundTransparency = 1;
+	Label.Position = UDim2.new(0, 30, 0.5, 0);
+	Label.Size = UDim2.new(1, -38, 1, 0);
+	Label.ZIndex = 4;
+	Label.Font = Enum.Font.GothamMedium;
+	Label.Text = "Search";
+	Label.TextColor3 = Compkiller.Colors.SwitchColor;
+	Label.TextSize = 13;
+	Label.TextTransparency = 0.5;
+	Label.TextXAlignment = Enum.TextXAlignment.Left;
+	Label.TextTruncate = Enum.TextTruncate.AtEnd;
+
+	table.insert(Compkiller.Elements.SwitchColor, {
+		Element = Label,
+		Property = "TextColor3"
+	});
+
+	Compkiller:_Hover(Row, function()
+		Compkiller:_Animation(Row, TweenInfo.new(0.15), { BackgroundTransparency = 0.925 });
+		Compkiller:_Animation(Icon, TweenInfo.new(0.15), { ImageTransparency = 0 });
+		Compkiller:_Animation(Label, TweenInfo.new(0.15), { TextTransparency = 0 });
 	end, function()
-		Compkiller:_Animation(SearchButton, TweenInfo.new(0.15), { ImageTransparency = 0.5 });
+		Compkiller:_Animation(Row, TweenInfo.new(0.15), { BackgroundTransparency = 1 });
+		Compkiller:_Animation(Icon, TweenInfo.new(0.15), { ImageTransparency = 0.5 });
+		Compkiller:_Animation(Label, TweenInfo.new(0.15), { TextTransparency = 0.5 });
 	end);
 
-	-- InputBegan (press), same reasoning as the AddOption gear fix — always
-	-- registers even if something shifts on screen between press and release.
-	SearchButton.InputBegan:Connect(function(Input)
-		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-			if WindowArgs._OpenSearch then
-				WindowArgs._OpenSearch();
-			end;
+	Compkiller:_Input(Row, function()
+		if WindowArgs._OpenSearch then
+			WindowArgs._OpenSearch();
 		end;
 	end);
 end;
@@ -7268,6 +7309,13 @@ function Compkiller.new(Config : Window)
 		Property = 'TextColor3'
 	});
 
+	-- One persistent search button, in the blank strip at the bottom of the
+	-- sidebar left behind by Userinfo not being parented in above. Wired to
+	-- WindowArgs._OpenSearch, set later in this same function when the
+	-- search overlay itself is built; safe to reference before that point
+	-- since it's a table field, not an upvalue.
+	Compkiller:_AddSearchButton(TabFrame, WindowArgs);
+
 	TabMainFrame.Name = Compkiller:_RandomString()
 	TabMainFrame.Parent = MainFrame
 	TabMainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -7278,12 +7326,6 @@ function Compkiller.new(Config : Window)
 	TabMainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
 	TabMainFrame.Size = UDim2.new(1, 0, 1, 0)
 	TabMainFrame.ZIndex = 5
-
-	-- One persistent search icon for the whole window (not per-tab) — see
-	-- Compkiller:_AddSearchButton. Wired to WindowArgs._OpenSearch, set later
-	-- in this same function when the search overlay itself is built; safe to
-	-- reference before that point since it's a table field, not an upvalue.
-	Compkiller:_AddSearchButton(MainFrame, WindowArgs);
 
 	if Compkiller:_IsMobile() then
 		Compkiller:_AddDragBlacklist(TabButtons);
@@ -9475,67 +9517,12 @@ function Compkiller.new(Config : Window)
 			end;
 
 			-- Upgrade the "Add Config" section: TextBox supports Enter-to-submit and
-			-- doubles as a paste target for config codes. The old repurposed header
-			-- close-icons are hidden in favor of a proper labeled Import button.
-			local ImportBtn;
+			-- doubles as a paste target for config codes (see _CreateConfig's
+			-- _LooksLikePayload check below) — no separate Import button needed.
+			-- The old repurposed header close-icons stay hidden either way.
 			do
 				SectionClose.Visible = false;
 				SectionClose_2.Visible = false;
-
-				ImportBtn = Header:FindFirstChild("__ImportBtn");
-				if not ImportBtn then
-					ImportBtn = Instance.new("Frame");
-					ImportBtn.Name = "__ImportBtn";
-					ImportBtn.Parent = Header;
-					ImportBtn.AnchorPoint = Vector2.new(1, 0.5);
-					ImportBtn.BackgroundColor3 = Compkiller.Colors.Highlight;
-					ImportBtn.BackgroundTransparency = 0.1;
-					ImportBtn.BorderSizePixel = 0;
-					ImportBtn.Position = UDim2.new(1, -10, 0.5, 0);
-					ImportBtn.Size = UDim2.new(0, 72, 0, 20);
-					ImportBtn.ZIndex = 10;
-					table.insert(Compkiller.Elements.Highlight , { Element = ImportBtn, Property = 'BackgroundColor3' });
-
-					local impCorner = Instance.new("UICorner");
-					impCorner.CornerRadius = UDim.new(0, 4);
-					impCorner.Parent = ImportBtn;
-
-					local impStroke = Instance.new("UIStroke");
-					impStroke.Color = Compkiller.Colors.StrokeColor;
-					impStroke.Parent = ImportBtn;
-					table.insert(Compkiller.Elements.StrokeColor , { Element = impStroke, Property = 'Color' });
-
-					local impIcon = Instance.new("ImageLabel");
-					impIcon.Parent = ImportBtn;
-					impIcon.AnchorPoint = Vector2.new(0, 0.5);
-					impIcon.BackgroundTransparency = 1;
-					impIcon.Position = UDim2.new(0, 7, 0.5, 0);
-					impIcon.Size = UDim2.new(0, 12, 0, 12);
-					impIcon.ZIndex = 11;
-					impIcon.Image = Compkiller:CacheImage("rbxassetid://10709799288");
-					impIcon.ImageColor3 = Compkiller.Colors.SwitchColor;
-					table.insert(Compkiller.Elements.SwitchColor , { Element = impIcon, Property = 'ImageColor3' });
-
-					local impLabel = Instance.new("TextLabel");
-					impLabel.Parent = ImportBtn;
-					impLabel.AnchorPoint = Vector2.new(0, 0.5);
-					impLabel.BackgroundTransparency = 1;
-					impLabel.Position = UDim2.new(0, 23, 0.5, 0);
-					impLabel.Size = UDim2.new(1, -29, 1, 0);
-					impLabel.ZIndex = 11;
-					impLabel.Font = Enum.Font.GothamMedium;
-					impLabel.Text = "Import";
-					impLabel.TextColor3 = Compkiller.Colors.SwitchColor;
-					impLabel.TextSize = 12;
-					impLabel.TextXAlignment = Enum.TextXAlignment.Left;
-					table.insert(Compkiller.Elements.SwitchColor , { Element = impLabel, Property = 'TextColor3' });
-
-					Compkiller:_Hover(ImportBtn, function()
-						Compkiller:_Animation(ImportBtn, TweenInfo.new(0.2), { BackgroundTransparency = 0 });
-					end, function()
-						Compkiller:_Animation(ImportBtn, TweenInfo.new(0.2), { BackgroundTransparency = 0.1 });
-					end);
-				end;
 
 				-- Add a search box above the scrolling frame
 				if not ConfigList:FindFirstChild("__SearchFrame") then
@@ -9628,14 +9615,6 @@ function Compkiller.new(Config : Window)
 				if ok and type(out) == "string" and out ~= "" then return out; end;
 			end;
 
-			local function _ReadClipboard()
-				local ok, out = pcall(function()
-					local f = getclipboard or get_clipboard or getrbxclipboard;
-					return f and f() or nil;
-				end);
-				if ok and type(out) == "string" and out:byte() then return out; end;
-			end;
-
 			function TabArgs.BuildShareCode(raw)
 				local b64 = _TryB64Encode(raw);
 				return b64 and ("BSHCFG1|" .. b64) or raw;
@@ -9702,30 +9681,6 @@ function Compkiller.new(Config : Window)
 				return true;
 			end;
 
-			local function _DoImport()
-				-- Priority: whatever the user pasted into the name box, then clipboard
-				local candidates = {};
-				if TextBox.Text:byte() then table.insert(candidates, TextBox.Text); end;
-				local clip = _ReadClipboard();
-				if clip then table.insert(candidates, clip); end;
-
-				for _, raw in ipairs(candidates) do
-					local decoded = _DecodePayload(raw);
-					if decoded then
-						if _ImportDecoded(decoded) then
-							TextBox.Text = "";
-						end;
-						return;
-					end;
-				end;
-
-				if #candidates == 0 then
-					_Notify("Copy a config code first, or paste it into the box below", 3);
-				else
-					_Notify("No valid config code found — use the clipboard icon on a config to export one", 3);
-				end;
-			end;
-
 			local function _CreateConfig(rawName)
 				-- Pasted a config code into the name box? Import it instead of
 				-- creating a garbage-named empty config.
@@ -9768,8 +9723,6 @@ function Compkiller.new(Config : Window)
 					_CreateConfig(txt);
 				end;
 			end);
-
-			Compkiller:_Input(ImportBtn, _DoImport);
 
 			Refresh = function()
 				local FullConfig = Configuration.Config:GetFullConfigs();
@@ -10717,13 +10670,8 @@ function Compkiller.new(Config : Window)
 			TabContent.BackgroundTransparency = 1.000
 			TabContent.BorderColor3 = Color3.fromRGB(0, 0, 0)
 			TabContent.BorderSizePixel = 0
-			-- Top-only inset (vs. the even -15 margin on every other edge) so the
-			-- first section in either column never renders under the persistent
-			-- search icon fixed to MainFrame's top-right corner. Left/Right below
-			-- are sized as a percentage of TabContent's height, so they shrink
-			-- with it automatically — no need to touch their geometry too.
-			TabContent.Position = UDim2.new(0.5, 0, 0.5, 14)
-			TabContent.Size = UDim2.new(1, -15, 1, -43)
+			TabContent.Position = UDim2.new(0.5, 0, 0.5, 0)
+			TabContent.Size = UDim2.new(1, -15, 1, -15)
 			TabContent.ZIndex = 6
 
 			Left.Name = Compkiller:_RandomString()
