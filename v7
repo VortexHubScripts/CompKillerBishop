@@ -1665,21 +1665,22 @@ function Compkiller:ArmConfirm(Callback : (boolean , ...any) -> () , Window : nu
 
 	return function(...)
 		local now = tick();
+		local Args = table.pack(...); -- task.delay's closure below can't see the outer '...'
 
 		if now - _lastClick <= Window then
 			_lastClick = 0;
 
-			if Callback then Callback(true , ...); end;
+			if Callback then Callback(true , table.unpack(Args, 1, Args.n)); end;
 		else
 			_lastClick = now;
 
-			if Callback then Callback(false , ...); end;
+			if Callback then Callback(false , table.unpack(Args, 1, Args.n)); end;
 
 			task.delay(Window, function()
 				if _lastClick == now then
 					_lastClick = 0;
 
-					if Callback then Callback(nil , ...); end; -- disarmed by timeout, no click
+					if Callback then Callback(nil , table.unpack(Args, 1, Args.n)); end; -- disarmed by timeout, no click
 				end;
 			end);
 		end;
