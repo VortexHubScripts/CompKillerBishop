@@ -4830,13 +4830,29 @@ Compkiller._SEARCHABLE_METHODS = {
 	"AddDropdown", "AddTextBox", "AddLabel", "AddParagraph"
 };
 
-function Compkiller:_WrapSectionSearch(WindowArgs, Args, TabName, SectionName, SelectTab, SectionFrame)
+function Compkiller:_WrapSectionSearch(WindowArgs, Args, TabName, SectionName, SelectTab, SectionFrame, EnsureOpen)
 	for _, MethodName in ipairs(Compkiller._SEARCHABLE_METHODS) do
 		local Original = Args[MethodName];
 
 		if Original then
 			Args[MethodName] = function(self, Config, ...)
+				-- Each Add* call parents exactly one new Frame directly onto
+				-- SectionFrame — diff the children before/after so GoTo can flash
+				-- that specific element instead of the whole section around it.
+				local ChildrenBefore = {};
+				for _, Child in ipairs(SectionFrame:GetChildren()) do
+					ChildrenBefore[Child] = true;
+				end;
+
 				local Result = Original(self, Config, ...);
+
+				local ElementFrame = SectionFrame;
+				for _, Child in ipairs(SectionFrame:GetChildren()) do
+					if not ChildrenBefore[Child] then
+						ElementFrame = Child;
+						break;
+					end;
+				end;
 
 				local Name = Config and Config.Name;
 
@@ -4851,7 +4867,9 @@ function Compkiller:_WrapSectionSearch(WindowArgs, Args, TabName, SectionName, S
 
 							task.defer(function()
 								task.wait(0.05);
-								Compkiller:_RevealSection(SectionFrame);
+								if EnsureOpen then EnsureOpen(); end;
+								task.wait(0.05);
+								Compkiller:_RevealElement(ElementFrame, SectionFrame);
 							end);
 						end
 					});
@@ -4865,14 +4883,24 @@ function Compkiller:_WrapSectionSearch(WindowArgs, Args, TabName, SectionName, S
 	return Args;
 end;
 
--- Scrolls the section's containing ScrollingFrame so it's in view, then
--- flashes it briefly so the eye can find it after a search jump.
-function Compkiller:_RevealSection(SectionFrame: Frame)
-	local ScrollFrame = SectionFrame and SectionFrame:FindFirstAncestorWhichIsA("ScrollingFrame");
+-- Scrolls the containing ScrollingFrame so ElementFrame is in view, then
+-- flashes ElementFrame itself (falling back to FallbackFrame, its section,
+-- if the specific element frame couldn't be determined) so the eye can find
+-- it after a search jump.
+function Compkiller:_RevealElement(ElementFrame: Frame, FallbackFrame: Frame)
+	local Target = ElementFrame or FallbackFrame;
+
+	if not Target or not Target.Parent then
+		Target = FallbackFrame;
+	end;
+
+	if not Target then return; end;
+
+	local ScrollFrame = Target:FindFirstAncestorWhichIsA("ScrollingFrame");
 
 	if not ScrollFrame then return; end;
 
-	local TargetY = math.max(0, (SectionFrame.AbsolutePosition.Y - ScrollFrame.AbsolutePosition.Y) + ScrollFrame.CanvasPosition.Y - 10);
+	local TargetY = math.max(0, (Target.AbsolutePosition.Y - ScrollFrame.AbsolutePosition.Y) + ScrollFrame.CanvasPosition.Y - 10);
 
 	TweenService:Create(ScrollFrame, TweenInfo.new(0.4, Enum.EasingStyle.Quint), {
 		CanvasPosition = Vector2.new(ScrollFrame.CanvasPosition.X, TargetY)
@@ -4880,12 +4908,12 @@ function Compkiller:_RevealSection(SectionFrame: Frame)
 
 	local Flash = Instance.new("Frame");
 	Flash.Name = Compkiller:_RandomString();
-	Flash.Parent = SectionFrame;
+	Flash.Parent = Target;
 	Flash.BackgroundColor3 = Compkiller.Colors.Highlight;
 	Flash.BackgroundTransparency = 0.55;
 	Flash.BorderSizePixel = 0;
 	Flash.Size = UDim2.fromScale(1, 1);
-	Flash.ZIndex = SectionFrame.ZIndex + 50;
+	Flash.ZIndex = Target.ZIndex + 50;
 
 	local FlashCorner = Instance.new("UICorner");
 	FlashCorner.CornerRadius = UDim.new(0, 6);
@@ -7971,7 +7999,16 @@ function Compkiller.new(Config : Window)
 
 			table.insert(TabArgs.Tabs,Id)
 
-			Compkiller:_Input(Frame,function()
+			-- Selects this specific inner tab AND the outer container tab entry
+			-- in WindowArgs.Tabs — selecting only the inner Signal (as search's
+			-- GoTo used to) left whatever OTHER top-level tab was active still
+			-- visible underneath, since nothing ever told WindowArgs.Tabs to
+			-- switch away from it. Mirrors the click handler below exactly.
+			local function SelectContainerAndTab()
+				for i,v in next, WindowArgs.Tabs do
+					v.Remote:Fire(v.Root == TabButton);
+				end;
+
 				for i,v in next , TabArgs.Tabs do
 					if v.Root == Frame then
 						TabArgs.__Current = v;
@@ -7981,13 +8018,16 @@ function Compkiller.new(Config : Window)
 						v.Remote:Fire(false);
 					end;
 				end;
-			end);
+			end;
+
+			Compkiller:_Input(Frame, SelectContainerAndTab);
 
 			return WindowArgs:DrawTab(TabConfig , {
 				ID = Id,
 				Highlight = Highlight,
 				Signal = InternalSignal,
-				Parent = MainFrame
+				Parent = MainFrame,
+				SelectSelf = SelectContainerAndTab
 			});
 		end;
 
@@ -10460,7 +10500,11 @@ function Compkiller.new(Config : Window)
 
 			TabOpenSignal = Internal.Signal;
 
-			TabArgs._SelectSelf = function()
+			-- Internal.SelectSelf (set by DrawContainerTab) also selects the
+			-- outer container tab in WindowArgs.Tabs and deselects sibling
+			-- inner tabs — without it, firing only Internal.Signal left
+			-- whatever else was open still visible underneath/alongside it.
+			TabArgs._SelectSelf = Internal.SelectSelf or function()
 				Internal.Signal:Fire(true);
 			end;
 
@@ -11148,6 +11192,21 @@ function Compkiller.new(Config : Window)
 				refreshScale();
 			end);
 
+			-- Used by search (GoTo) so jumping to an element inside a collapsed
+			-- section actually reveals it instead of scrolling to a closed header.
+			local function EnsureSectionOpen()
+				if IsOpen then return; end;
+
+				IsOpen = true;
+
+				Compkiller:_Animation(SectionClose,TweenInfo.new(0.35),{
+					Rotation = 0
+				});
+
+				refresh();
+				refreshScale();
+			end;
+
 			task.delay(2.5,function()
 				refresh();
 				refreshScale();
@@ -11167,7 +11226,7 @@ function Compkiller.new(Config : Window)
 
 			local SectionArgs = Compkiller:_LoadElement(Section , true , TabOpenSignal);
 
-			Compkiller:_WrapSectionSearch(WindowArgs, SectionArgs, TabConfig.Name, config.Name, TabArgs._SelectSelf, Section);
+			Compkiller:_WrapSectionSearch(WindowArgs, SectionArgs, TabConfig.Name, config.Name, TabArgs._SelectSelf, Section, EnsureSectionOpen);
 
 			return SectionArgs;
 		end;
