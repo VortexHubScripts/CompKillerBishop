@@ -4919,11 +4919,19 @@ function Compkiller:_RevealElement(ElementFrame: Frame, FallbackFrame: Frame)
 	FlashCorner.CornerRadius = UDim.new(0, 6);
 	FlashCorner.Parent = Flash;
 
-	TweenService:Create(Flash, TweenInfo.new(0.9, Enum.EasingStyle.Quint), {
-		BackgroundTransparency = 1
-	}):Play();
+	-- Hold solid for a beat so the eye actually lands on it, then fade —
+	-- fading immediately from the moment it appears made it too easy to miss.
+	local HOLD_TIME, FADE_TIME = 1, 1;
 
-	task.delay(0.9, function()
+	task.delay(HOLD_TIME, function()
+		if not Flash.Parent then return; end;
+
+		TweenService:Create(Flash, TweenInfo.new(FADE_TIME, Enum.EasingStyle.Quint), {
+			BackgroundTransparency = 1
+		}):Play();
+	end);
+
+	task.delay(HOLD_TIME + FADE_TIME, function()
 		Flash:Destroy();
 	end);
 end;
@@ -5871,6 +5879,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		DescriptionText.TextTransparency = 0.500
 		DescriptionText.TextXAlignment = Enum.TextXAlignment.Left
 		DescriptionText.TextYAlignment = Enum.TextYAlignment.Top
+		DescriptionText.TextWrapped = true
 
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = DescriptionText,
@@ -5878,8 +5887,19 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		});
 
 		local Base = 15;
+		local _lastWidth = -1;
 
+		-- DescriptionText.TextWrapped means long content wraps instead of
+		-- getting clipped by Paragraph.ClipsDescendants, but that means its
+		-- height now depends on the WRAP width — measuring with an unbounded
+		-- (math.huge) width, like the title still does, would always come
+		-- back as a single line and undersize the frame. Measure against the
+		-- text label's real pixel width instead.
 		local UpdateScale = function()
+			local Width = DescriptionText.AbsoluteSize.X;
+			if Width <= 0 then Width = math.max(Paragraph.AbsoluteSize.X - 20, 200); end;
+
+			_lastWidth = Width;
 
 			if not DescriptionText.Text:byte() then
 				local TitleScale = TextService:GetTextSize(BlockText.Text,BlockText.TextSize,BlockText.Font,Vector2.new(math.huge,math.huge));
@@ -5889,7 +5909,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 				});
 			else
 				local TitleScale = TextService:GetTextSize(BlockText.Text,BlockText.TextSize,BlockText.Font,Vector2.new(math.huge,math.huge));
-				local ContentScale = TextService:GetTextSize(DescriptionText.Text,DescriptionText.TextSize,DescriptionText.Font,Vector2.new(math.huge,math.huge));
+				local ContentScale = TextService:GetTextSize(DescriptionText.Text,DescriptionText.TextSize,DescriptionText.Font,Vector2.new(Width,math.huge));
 
 				Compkiller:_Animation(Paragraph,TweenInfo.new(0.15),{
 					Size = UDim2.new(1, -1, 0, (TitleScale.Y + ContentScale.Y) + Base)
@@ -5898,6 +5918,18 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		end;
 
 		UpdateScale();
+
+		-- Recompute on wrap-width changes (window resize / section reflow).
+		-- Guarded to width-only changes since our own height tween above
+		-- fires AbsoluteSize's changed signal every frame it's playing too
+		-- (DescriptionText's height tracks Paragraph's) — recursing into
+		-- UpdateScale on every one of those would just re-trigger the same
+		-- animation over and over for no reason.
+		DescriptionText:GetPropertyChangedSignal('AbsoluteSize'):Connect(function()
+			if DescriptionText.AbsoluteSize.X ~= _lastWidth then
+				UpdateScale();
+			end;
+		end);
 
 		local Args = {};
 
