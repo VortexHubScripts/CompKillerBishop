@@ -4942,11 +4942,18 @@ function Compkiller:_RevealElement(ElementFrame: Frame, FallbackFrame: Frame)
 	FlashCorner.CornerRadius = UDim.new(0, 6);
 	FlashCorner.Parent = Flash;
 
-	-- Hold solid for a beat so the eye actually lands on it, then fade —
-	-- fading immediately from the moment it appears made it too easy to miss.
-	local HOLD_TIME, FADE_TIME = 1, 1;
+	-- Blink a few times so the eye actually catches it — a static hold-then-
+	-- fade was too easy to miss if you looked away for a moment. Reverses=true
+	-- makes each "repeat" a full there-and-back cycle, so BLINK_REPEATS=5
+	-- gives 3 full on/off blinks (the initial play + 5 repeats = 6 half-cycles).
+	local BLINK_TIME, BLINK_REPEATS, FADE_TIME = 0.15, 5, 0.3;
+	local BLINK_DURATION = BLINK_TIME * 2 * (BLINK_REPEATS + 1);
 
-	task.delay(HOLD_TIME, function()
+	TweenService:Create(Flash, TweenInfo.new(BLINK_TIME, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, BLINK_REPEATS, true), {
+		BackgroundTransparency = 0.95
+	}):Play();
+
+	task.delay(BLINK_DURATION, function()
 		if not Flash.Parent then return; end;
 
 		TweenService:Create(Flash, TweenInfo.new(FADE_TIME, Enum.EasingStyle.Quint), {
@@ -4954,7 +4961,7 @@ function Compkiller:_RevealElement(ElementFrame: Frame, FallbackFrame: Frame)
 		}):Play();
 	end);
 
-	task.delay(HOLD_TIME + FADE_TIME, function()
+	task.delay(BLINK_DURATION + FADE_TIME, function()
 		Flash:Destroy();
 	end);
 end;
@@ -7095,6 +7102,79 @@ function Compkiller.new(Config : Window)
 	});
 
 	UICorner.Parent = MainFrame
+
+	-- Resizable window: a small drag grip in the bottom-right corner. MainFrame
+	-- is anchored (0.5,0.5), so growing/shrinking its Size expands symmetrically
+	-- around the center rather than needing a separate Position adjustment.
+	-- Skipped on mobile — a corner grip that small isn't a workable touch target.
+	if not Compkiller:_IsMobile() then
+		local ResizeHandle = Instance.new("Frame")
+		local ResizeIcon = Instance.new("ImageLabel")
+
+		ResizeHandle.Name = Compkiller:_RandomString()
+		ResizeHandle.Parent = MainFrame
+		ResizeHandle.AnchorPoint = Vector2.new(1, 1)
+		ResizeHandle.BackgroundTransparency = 1
+		ResizeHandle.Position = UDim2.new(1, 0, 1, 0)
+		ResizeHandle.Size = UDim2.new(0, 20, 0, 20)
+		ResizeHandle.ZIndex = MainFrame.ZIndex + 60
+		ResizeHandle.Active = true
+
+		Compkiller:_AddDragBlacklist(ResizeHandle);
+
+		ResizeIcon.Name = Compkiller:_RandomString()
+		ResizeIcon.Parent = ResizeHandle
+		ResizeIcon.AnchorPoint = Vector2.new(1, 1)
+		ResizeIcon.BackgroundTransparency = 1
+		ResizeIcon.Position = UDim2.new(1, -4, 1, -4)
+		ResizeIcon.Size = UDim2.new(0, 12, 0, 12)
+		ResizeIcon.ZIndex = ResizeHandle.ZIndex + 1
+		ResizeIcon.Image = Compkiller:_GetIcon("move-diagonal-2")
+		ResizeIcon.ImageColor3 = Compkiller.Colors.SwitchColor
+		ResizeIcon.ImageTransparency = 0.6
+
+		table.insert(Compkiller.Elements.SwitchColor, { Element = ResizeIcon, Property = 'ImageColor3' });
+
+		Compkiller:_Hover(ResizeHandle, function()
+			Compkiller:_Animation(ResizeIcon, TweenInfo.new(0.15), { ImageTransparency = 0 });
+		end, function()
+			Compkiller:_Animation(ResizeIcon, TweenInfo.new(0.15), { ImageTransparency = 0.6 });
+		end);
+
+		local MIN_SIZE, MAX_SIZE = Vector2.new(380, 400), Vector2.new(1000, 900);
+		local Resizing = false;
+		local StartMouse: Vector3 = nil;
+		local StartSize: UDim2 = nil;
+
+		ResizeHandle.InputBegan:Connect(function(Input)
+			if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+				Resizing = true;
+				StartMouse = Input.Position;
+				StartSize = MainFrame.Size;
+
+				Input.Changed:Connect(function()
+					if Input.UserInputState == Enum.UserInputState.End then
+						Resizing = false;
+					end;
+				end);
+			end;
+		end);
+
+		UserInputService.InputChanged:Connect(function(Input)
+			if Resizing and (Input.UserInputType == Enum.UserInputType.MouseMovement or Input.UserInputType == Enum.UserInputType.Touch) then
+				local Delta = Input.Position - StartMouse;
+
+				local NewX = math.clamp(StartSize.X.Offset + Delta.X, MIN_SIZE.X, MAX_SIZE.X);
+				local NewY = math.clamp(StartSize.Y.Offset + Delta.Y, MIN_SIZE.Y, MAX_SIZE.Y);
+
+				MainFrame.Size = UDim2.new(0, NewX, 0, NewY);
+
+				-- Keep Config.Scale in sync so toggling the window off/on (which
+				-- re-tweens to Config.Scale) doesn't snap back to the original size.
+				Config.Scale = MainFrame.Size;
+			end;
+		end);
+	end;
 
 	local TabFrameBaseTrans = 0.25;
 
@@ -11975,15 +12055,67 @@ function Compkiller.new(Config : Window)
 			return 0;
 		end;
 
+		-- Keyboard nav state: CurrentResults is the rendered rows in display
+		-- order (parallel to what RenderResults built), SelectedIndex is which
+		-- one Up/Down/Enter act on. Mouse hover keeps them in sync too, so
+		-- switching between mouse and keyboard mid-search never feels stale.
+		local CurrentResults = {};
+		local SelectedIndex = 0;
+
 		local function ClearResults()
 			for _, Child in ipairs(ResultsFrame:GetChildren()) do
 				if Child:IsA("TextButton") then
 					Child:Destroy();
 				end;
 			end;
+
+			table.clear(CurrentResults);
+			SelectedIndex = 0;
+		end;
+
+		local function SetSelected(Index)
+			if #CurrentResults == 0 then
+				SelectedIndex = 0;
+				return;
+			end;
+
+			Index = math.clamp(Index, 1, #CurrentResults);
+
+			if CurrentResults[SelectedIndex] then
+				CurrentResults[SelectedIndex].Stroke.Transparency = 1;
+			end;
+
+			SelectedIndex = Index;
+
+			local Selected = CurrentResults[SelectedIndex];
+			Selected.Stroke.Transparency = 0;
+
+			-- Keep the selected row in view as Up/Down walks past the visible edge.
+			local RowTop = Selected.Row.Position.Y.Offset;
+			local RowBottom = RowTop + Selected.Row.AbsoluteSize.Y;
+			local ViewTop = ResultsFrame.CanvasPosition.Y;
+			local ViewBottom = ViewTop + ResultsFrame.AbsoluteSize.Y;
+
+			if RowTop < ViewTop then
+				ResultsFrame.CanvasPosition = Vector2.new(0, RowTop);
+			elseif RowBottom > ViewBottom then
+				ResultsFrame.CanvasPosition = Vector2.new(0, RowBottom - ResultsFrame.AbsoluteSize.Y);
+			end;
 		end;
 
 		local CloseSearch; -- forward-declared, defined below
+
+		local function ActivateSelected()
+			local Selected = CurrentResults[SelectedIndex];
+			if not Selected then return; end;
+
+			if Selected.Entry.GoTo then
+				local ok = pcall(Selected.Entry.GoTo);
+				if not ok then warn("[Compkiller] search GoTo failed for", Selected.Entry.Text); end;
+			end;
+
+			if CloseSearch then CloseSearch(); end;
+		end;
 
 		local function RenderResults(Query)
 			ClearResults();
@@ -12029,6 +12161,16 @@ function Compkiller.new(Config : Window)
 				RowCorner.CornerRadius = UDim.new(0, 5);
 				RowCorner.Parent = Row;
 
+				-- Separate from the hover background tween below so keyboard
+				-- selection (Up/Down) and mouse hover can't fight over the same
+				-- property — this is solid only for the keyboard-selected row.
+				local RowStroke = Instance.new("UIStroke");
+				RowStroke.Color = Compkiller.Colors.Highlight;
+				RowStroke.Thickness = 1.5;
+				RowStroke.Transparency = 1;
+				RowStroke.Parent = Row;
+				table.insert(Compkiller.Elements.Highlight, { Element = RowStroke, Property = "Color" });
+
 				local NameLabel = Instance.new("TextLabel");
 				NameLabel.Parent = Row;
 				NameLabel.BackgroundTransparency = 1;
@@ -12063,20 +12205,23 @@ function Compkiller.new(Config : Window)
 				PathLabel.TextTruncate = Enum.TextTruncate.AtEnd;
 				PathLabel.ZIndex = 10002;
 
+				CurrentResults[i] = { Row = Row, Stroke = RowStroke, Entry = Entry };
+
 				Compkiller:_Hover(Row, function()
 					Compkiller:_Animation(Row, TweenInfo.new(0.15), { BackgroundTransparency = 0 });
+					SetSelected(i);
 				end, function()
 					Compkiller:_Animation(Row, TweenInfo.new(0.15), { BackgroundTransparency = 0.3 });
 				end);
 
 				Row.MouseButton1Click:Connect(function()
-					if Entry.GoTo then
-						local ok = pcall(Entry.GoTo);
-						if not ok then warn("[Compkiller] search GoTo failed for", Entry.Text); end;
-					end;
-
-					if CloseSearch then CloseSearch(); end;
+					SetSelected(i);
+					ActivateSelected();
 				end);
+			end;
+
+			if Shown > 0 then
+				SetSelected(1);
 			end;
 
 			local ContentHeight = (Shown * 36);
@@ -12128,6 +12273,12 @@ function Compkiller.new(Config : Window)
 				end;
 			elseif Input.KeyCode == Enum.KeyCode.Escape and SearchOverlay.Visible then
 				CloseSearch();
+			elseif SearchOverlay.Visible and Input.KeyCode == Enum.KeyCode.Down then
+				SetSelected(SelectedIndex + 1);
+			elseif SearchOverlay.Visible and Input.KeyCode == Enum.KeyCode.Up then
+				SetSelected(SelectedIndex - 1);
+			elseif SearchOverlay.Visible and Input.KeyCode == Enum.KeyCode.Return then
+				ActivateSelected();
 			end;
 		end);
 	end;
@@ -12770,6 +12921,17 @@ function Compkiller.newNotify()
 
 	local LayoutREF = 0;
 
+	-- Toast collapsing: a notification that's an exact repeat (same Title AND
+	-- Content) of one still on screen collapses into it with a "×N" counter
+	-- instead of stacking a duplicate, so a spammy loop firing the same
+	-- notification every frame can't flood the corner. Keyed on Title+Content
+	-- together (not Title alone) so two DIFFERENT messages that just happen to
+	-- share a boilerplate title (e.g. this file's own Config tab notifications,
+	-- which all use Title = "Configs") never get merged and lose their real
+	-- content. Cleared when a toast actually closes so a later, unrelated one
+	-- with the same key starts fresh.
+	local ActiveByKey = {};
+
 	Compkiller.NOTIFY_CACHE = {
 		Root = Notification,
 		new = function(Notify: Notify) : NotifyPayback
@@ -12781,6 +12943,13 @@ function Compkiller.newNotify()
 				Content = "Content",
 				Duration = 3,
 			});
+
+			local CollapseKey = Notify.Title .. "\30" .. Notify.Content;
+
+			if ActiveByKey[CollapseKey] then
+				ActiveByKey[CollapseKey].Collapse(Notify);
+				return ActiveByKey[CollapseKey].Payback;
+			end;
 
 			LayoutREF += 5;
 
@@ -12923,6 +13092,8 @@ function Compkiller.newNotify()
 			UpdateText();
 
 			local Close = function()
+				if ActiveByKey[CollapseKey] then ActiveByKey[CollapseKey] = nil; end;
+
 				Compkiller:_Animation(NotifyFrame,TweenInfo.new(0.65,Enum.EasingStyle.Quint),{
 					Position = UDim2.new(1,200,0,0)
 				});
@@ -12944,24 +13115,44 @@ function Compkiller.newNotify()
 				});
 			end;
 
-			if typeof(Notify.Duration) == 'number' and Notify.Duration ~= math.huge then
-				Compkiller:_Animation(TimeLeft,TweenInfo.new(Notify.Duration + 0.2,Enum.EasingStyle.Linear),{
-					Size = UDim2.new(1, 0, 1, 0)
-				});
+			local CloseThread = nil;
 
-				return task.delay(0.25,function()
-					Show();
+			-- (Re)starts the auto-close timer from right now. Cancels any
+			-- already-pending close first so a collapsed repeat resets the
+			-- countdown instead of getting cut off mid-way by the ORIGINAL
+			-- occurrence's timer.
+			local StartTimer = function()
+				if CloseThread then
+					pcall(task.cancel, CloseThread);
+					CloseThread = nil;
+				end;
 
-					task.delay(Notify.Duration + 0.2,Close)
-				end);
+				if typeof(Notify.Duration) == 'number' and Notify.Duration ~= math.huge then
+					TimeLeft.Size = UDim2.new(0, 0, 1, 0);
+
+					Compkiller:_Animation(TimeLeft,TweenInfo.new(Notify.Duration + 0.2,Enum.EasingStyle.Linear),{
+						Size = UDim2.new(1, 0, 1, 0)
+					});
+
+					CloseThread = task.delay(Notify.Duration + 0.2, Close);
+				end;
 			end;
 
-			Show();
+			local Count = 1;
 
-			return {
+			local Collapse = function(NewNotify)
+				Count += 1;
+				Notify.Duration = NewNotify.Duration or Notify.Duration;
+
+				Header.Text = NewNotify.Title .. " ×" .. Count;
+				UpdateText();
+				StartTimer();
+			end;
+
+			local Payback = {
 				Title = function(self , new)
-					Header.Text = new;
-					UpdateText(); 
+					Header.Text = (Count > 1) and (new .. " ×" .. Count) or new;
+					UpdateText();
 				end,
 
 				Content = function(self , new)
@@ -12978,7 +13169,7 @@ function Compkiller.newNotify()
 					end;
 
 					if new > 1 then
-						new = (new / 100);	
+						new = (new / 100);
 					end;
 
 					Compkiller:_Animation(TimeLeft,TweenInfo.new(Time or 0.85,(Time and Enum.EasingStyle.Linear) or Enum.EasingStyle.Quint),{
@@ -12989,7 +13180,20 @@ function Compkiller.newNotify()
 				end,
 
 				Close = Close,
-			}
+			};
+
+			ActiveByKey[CollapseKey] = { Collapse = Collapse, Payback = Payback };
+
+			if typeof(Notify.Duration) == 'number' and Notify.Duration ~= math.huge then
+				return task.delay(0.25,function()
+					Show();
+					StartTimer();
+				end);
+			end;
+
+			Show();
+
+			return Payback;
 		end,
 	};
 
