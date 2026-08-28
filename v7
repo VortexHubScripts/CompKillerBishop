@@ -4959,6 +4959,50 @@ function Compkiller:_RevealElement(ElementFrame: Frame, FallbackFrame: Frame)
 	end);
 end;
 
+-- Small search-icon button pinned to the top-right of a tab's content area,
+-- so search is discoverable without knowing the Ctrl+K shortcut. Called from
+-- both branches of WindowArgs:DrawTab (normal tabs and DrawContainerTab
+-- sub-tabs) right after TabContent is created, so every tab gets one.
+-- Wired to WindowArgs._OpenSearch, which the search overlay block near the
+-- end of Compkiller.new sets — by the time any tab is actually drawn (after
+-- Compkiller.new returns to the caller) that assignment has already run.
+function Compkiller:_AddTabSearchButton(TabContent: Frame, WindowArgs)
+	local SearchButton = Instance.new("ImageButton");
+
+	SearchButton.Name = Compkiller:_RandomString();
+	SearchButton.Parent = TabContent;
+	SearchButton.AnchorPoint = Vector2.new(1, 0);
+	SearchButton.BackgroundTransparency = 1;
+	SearchButton.Position = UDim2.new(1, -2, 0, -2);
+	SearchButton.Size = UDim2.new(0, 18, 0, 18);
+	SearchButton.ZIndex = TabContent.ZIndex + 20;
+	SearchButton.Image = Compkiller:_GetIcon("search");
+	SearchButton.ImageColor3 = Compkiller.Colors.SwitchColor;
+	SearchButton.ImageTransparency = 0.5;
+	SearchButton.AutoButtonColor = false;
+
+	table.insert(Compkiller.Elements.SwitchColor, {
+		Element = SearchButton,
+		Property = "ImageColor3"
+	});
+
+	Compkiller:_Hover(SearchButton, function()
+		Compkiller:_Animation(SearchButton, TweenInfo.new(0.15), { ImageTransparency = 0 });
+	end, function()
+		Compkiller:_Animation(SearchButton, TweenInfo.new(0.15), { ImageTransparency = 0.5 });
+	end);
+
+	-- InputBegan (press), same reasoning as the AddOption gear fix — always
+	-- registers even if something shifts on screen between press and release.
+	SearchButton.InputBegan:Connect(function(Input)
+		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+			if WindowArgs._OpenSearch then
+				WindowArgs._OpenSearch();
+			end;
+		end;
+	end);
+end;
+
 function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal , DisableStackKeybind)
 	local Zindex = Parent.ZIndex + 1;
 	local Tween = TweenInfo.new(0.25,Enum.EasingStyle.Quint);
@@ -10457,6 +10501,8 @@ function Compkiller.new(Config : Window)
 			TabContent.Size = UDim2.new(1, -5,1, -5)
 			TabContent.ZIndex = 6
 
+			Compkiller:_AddTabSearchButton(TabContent, WindowArgs);
+
 			Left.Name = Compkiller:_RandomString()
 			Left.Parent = TabContent
 			Left.Active = true
@@ -10669,6 +10715,8 @@ function Compkiller.new(Config : Window)
 			TabContent.Position = UDim2.new(0.5, 0, 0.5, 0)
 			TabContent.Size = UDim2.new(1, -15, 1, -15)
 			TabContent.ZIndex = 6
+
+			Compkiller:_AddTabSearchButton(TabContent, WindowArgs);
 
 			Left.Name = Compkiller:_RandomString()
 			Left.Parent = TabContent
@@ -12095,6 +12143,13 @@ function Compkiller.new(Config : Window)
 			ClearResults();
 			SearchBox:CaptureFocus();
 		end;
+
+		-- Exposed so the per-tab search icon (added in WindowArgs:DrawTab) can
+		-- open the same overlay Ctrl+K does. Table field, not a local upvalue,
+		-- so it's safe to read from DrawTab regardless of definition order —
+		-- by the time any tab is actually drawn (after Compkiller.new returns)
+		-- this block has already run and set it.
+		WindowArgs._OpenSearch = OpenSearch;
 
 		SearchBox:GetPropertyChangedSignal('Text'):Connect(function()
 			RenderResults(SearchBox.Text);
