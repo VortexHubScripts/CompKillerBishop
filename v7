@@ -4903,24 +4903,6 @@ function Compkiller:_WrapSectionSearch(WindowArgs, Args, TabName, SectionName, S
 		end;
 	end;
 
-	-- AddGroup returns its own Args table from a nested _LoadElement call —
-	-- wrap IT too (recursively) so elements added inside a group are just as
-	-- searchable as ones added directly to the section, and get flashed
-	-- against the group's own frame (GroupArgs.Root) rather than falling
-	-- back to the whole section.
-	local OriginalAddGroup = Args.AddGroup;
-
-	if OriginalAddGroup then
-		Args.AddGroup = function(self, Config, ...)
-			local GroupArgs = OriginalAddGroup(self, Config, ...);
-
-			local GroupLabel = (Config and Config.Name) or "Group";
-			local GroupSectionName = SectionName and (SectionName .. " › " .. GroupLabel) or GroupLabel;
-
-			return Compkiller:_WrapSectionSearch(WindowArgs, GroupArgs, TabName, GroupSectionName, SelectTab, GroupArgs.Root or SectionFrame, EnsureOpen);
-		end;
-	end;
-
 	return Args;
 end;
 
@@ -6785,68 +6767,6 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		Args.DropdownRoot = repi.Root;
 
 		return Args;
-	end;
-
-	-- A lightweight sub-divider inside a section — e.g. splitting one section
-	-- into "Basic" / "Advanced" clusters without the overhead of a whole new
-	-- Section or Tab. Not collapsible (unlike Section itself) and has no
-	-- border/background chrome, just a small caps-label header. Returns the
-	-- same Add* method set as a Section (AddToggle, AddSlider, ... and even
-	-- AddGroup again, for nesting), via its own independent _LoadElement call.
-	function Args:AddGroup(Config: Group)
-		Config = Compkiller.__CONFIG(Config, {
-			Name = "Group",
-		});
-
-		local GroupFrame = Instance.new("Frame")
-		local GroupListLayout = Instance.new("UIListLayout")
-		local GroupHeader = Instance.new("TextLabel")
-
-		GroupFrame.Name = Compkiller:_RandomString()
-		GroupFrame.Parent = Parent
-		GroupFrame.BackgroundTransparency = 1
-		GroupFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
-		GroupFrame.BorderSizePixel = 0
-		GroupFrame.AutomaticSize = Enum.AutomaticSize.Y
-		GroupFrame.Size = UDim2.new(1, -1, 0, 0)
-		GroupFrame.ZIndex = Zindex + 2
-
-		GroupListLayout.Parent = GroupFrame
-		GroupListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-		GroupListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-
-		GroupHeader.Name = Compkiller:_RandomString()
-		GroupHeader.Parent = GroupFrame
-		GroupHeader.BackgroundTransparency = 1
-		GroupHeader.BorderColor3 = Color3.fromRGB(0, 0, 0)
-		GroupHeader.BorderSizePixel = 0
-		GroupHeader.LayoutOrder = -100
-		GroupHeader.Size = UDim2.new(1, -20, 0, 22)
-		GroupHeader.ZIndex = Zindex + 3
-		GroupHeader.Font = Enum.Font.GothamBold
-		GroupHeader.Text = string.upper(Config.Name)
-		GroupHeader.TextColor3 = Compkiller.Colors.SwitchColor
-		GroupHeader.TextTransparency = 0.55
-		GroupHeader.TextSize = 11.000
-		GroupHeader.TextXAlignment = Enum.TextXAlignment.Left
-
-		if not GroupHeader.Text:byte() then
-			GroupHeader.Visible = false;
-		end;
-
-		table.insert(Compkiller.Elements.SwitchColor , {
-			Element = GroupHeader,
-			Property = 'TextColor3'
-		});
-
-		local GroupArgs = Compkiller:_LoadElement(GroupFrame, EnabledLine, Signal, DisableStackKeybind);
-
-		-- Exposed so search wrapping (_WrapSectionSearch) can diff/flash
-		-- against this group's own frame instead of falling back to the
-		-- whole parent section for elements added inside it.
-		GroupArgs.Root = GroupFrame;
-
-		return GroupArgs;
 	end;
 
 	return Args;
@@ -13001,29 +12921,6 @@ function Compkiller.newNotify()
 
 	local LayoutREF = 0;
 
-	-- Notification history: every toast (including collapsed repeats) gets
-	-- logged here, newest first, capped at MAX_HISTORY — for when a toast
-	-- flashes by before you finish reading it. Button + panel built below,
-	-- after ActiveByKey/History are both in scope.
-	local History = {};
-	local MAX_HISTORY = 20;
-
-	local function PushHistory(Notify)
-		table.insert(History, 1, {
-			Icon = Notify.Icon,
-			Title = Notify.Title,
-			Content = Notify.Content,
-			Time = os.time(),
-			Count = 1,
-		});
-
-		while #History > MAX_HISTORY do
-			table.remove(History);
-		end;
-
-		return History[1];
-	end;
-
 	-- Toast collapsing: a notification that's an exact repeat (same Title AND
 	-- Content) of one still on screen collapses into it with a "×N" counter
 	-- instead of stacking a duplicate, so a spammy loop firing the same
@@ -13050,17 +12947,9 @@ function Compkiller.newNotify()
 			local CollapseKey = Notify.Title .. "\30" .. Notify.Content;
 
 			if ActiveByKey[CollapseKey] then
-				if ActiveByKey[CollapseKey].HistoryEntry then
-					local Entry = ActiveByKey[CollapseKey].HistoryEntry;
-					Entry.Count += 1;
-					Entry.Time = os.time();
-				end;
-
 				ActiveByKey[CollapseKey].Collapse(Notify);
 				return ActiveByKey[CollapseKey].Payback;
 			end;
-
-			local HistoryEntry = PushHistory(Notify);
 
 			LayoutREF += 5;
 
@@ -13293,7 +13182,7 @@ function Compkiller.newNotify()
 				Close = Close,
 			};
 
-			ActiveByKey[CollapseKey] = { Collapse = Collapse, Payback = Payback, HistoryEntry = HistoryEntry };
+			ActiveByKey[CollapseKey] = { Collapse = Collapse, Payback = Payback };
 
 			if typeof(Notify.Duration) == 'number' and Notify.Duration ~= math.huge then
 				return task.delay(0.25,function()
@@ -13307,198 +13196,6 @@ function Compkiller.newNotify()
 			return Payback;
 		end,
 	};
-
-	-- ── Notification history panel ────────────────────────────────────
-	-- A small button (top-right of screen, well clear of the toast stack
-	-- which grows from the bottom-right corner) that opens a scrollable log
-	-- of the last MAX_HISTORY notifications — for when one flashes by
-	-- before you finish reading it.
-	do
-		local HistoryButton = Instance.new("ImageButton")
-		local HistoryPanel = Instance.new("Frame")
-		local PanelCorner = Instance.new("UICorner")
-		local PanelStroke = Instance.new("UIStroke")
-		local PanelTitle = Instance.new("TextLabel")
-		local RowsFrame = Instance.new("ScrollingFrame")
-		local RowsLayout = Instance.new("UIListLayout")
-
-		HistoryButton.Name = Compkiller:_RandomString();
-		HistoryButton.Parent = Notification;
-		HistoryButton.AnchorPoint = Vector2.new(1, 0);
-		HistoryButton.BackgroundColor3 = Compkiller.Colors.BlockBackground;
-		HistoryButton.BackgroundTransparency = 0.1;
-		HistoryButton.BorderSizePixel = 0;
-		HistoryButton.Position = UDim2.new(1, -10, 0, 10);
-		HistoryButton.Size = UDim2.new(0, 26, 0, 26);
-		HistoryButton.ZIndex = 500;
-		HistoryButton.Image = Compkiller:_GetIcon("history");
-		HistoryButton.ImageColor3 = Compkiller.Colors.SwitchColor;
-		HistoryButton.ImageTransparency = 0.4;
-		HistoryButton.AutoButtonColor = false;
-
-		table.insert(Compkiller.Elements.BlockBackground, { Element = HistoryButton, Property = "BackgroundColor3" });
-		table.insert(Compkiller.Elements.SwitchColor, { Element = HistoryButton, Property = "ImageColor3" });
-
-		local ButtonCorner = Instance.new("UICorner");
-		ButtonCorner.CornerRadius = UDim.new(1, 0);
-		ButtonCorner.Parent = HistoryButton;
-
-		Compkiller:_Hover(HistoryButton, function()
-			Compkiller:_Animation(HistoryButton, TweenInfo.new(0.15), { ImageTransparency = 0, BackgroundTransparency = 0 });
-		end, function()
-			Compkiller:_Animation(HistoryButton, TweenInfo.new(0.15), { ImageTransparency = 0.4, BackgroundTransparency = 0.1 });
-		end);
-
-		HistoryPanel.Name = Compkiller:_RandomString();
-		HistoryPanel.Parent = Notification;
-		HistoryPanel.AnchorPoint = Vector2.new(1, 0);
-		HistoryPanel.BackgroundColor3 = Compkiller.Colors.BlockBackground;
-		HistoryPanel.BorderSizePixel = 0;
-		HistoryPanel.Position = UDim2.new(1, -10, 0, 44);
-		HistoryPanel.Size = UDim2.new(0, 280, 0, 320);
-		HistoryPanel.ZIndex = 500;
-		HistoryPanel.Visible = false;
-		HistoryPanel.ClipsDescendants = true;
-
-		table.insert(Compkiller.Elements.BlockBackground, { Element = HistoryPanel, Property = "BackgroundColor3" });
-
-		PanelCorner.CornerRadius = UDim.new(0, 8);
-		PanelCorner.Parent = HistoryPanel;
-
-		PanelStroke.Color = Compkiller.Colors.HighStrokeColor;
-		PanelStroke.Parent = HistoryPanel;
-		table.insert(Compkiller.Elements.HighStrokeColor, { Element = PanelStroke, Property = "Color" });
-
-		PanelTitle.Name = Compkiller:_RandomString();
-		PanelTitle.Parent = HistoryPanel;
-		PanelTitle.BackgroundTransparency = 1;
-		PanelTitle.Position = UDim2.new(0, 12, 0, 8);
-		PanelTitle.Size = UDim2.new(1, -24, 0, 22);
-		PanelTitle.ZIndex = 501;
-		PanelTitle.Font = Enum.Font.GothamBold;
-		PanelTitle.Text = "Notification History";
-		PanelTitle.TextColor3 = Compkiller.Colors.SwitchColor;
-		PanelTitle.TextSize = 13;
-		PanelTitle.TextXAlignment = Enum.TextXAlignment.Left;
-		table.insert(Compkiller.Elements.SwitchColor, { Element = PanelTitle, Property = "TextColor3" });
-
-		RowsFrame.Name = Compkiller:_RandomString();
-		RowsFrame.Parent = HistoryPanel;
-		RowsFrame.BackgroundTransparency = 1;
-		RowsFrame.BorderSizePixel = 0;
-		RowsFrame.Position = UDim2.new(0, 6, 0, 34);
-		RowsFrame.Size = UDim2.new(1, -12, 1, -40);
-		RowsFrame.ZIndex = 501;
-		RowsFrame.ScrollBarThickness = 3;
-		RowsFrame.BottomImage = "";
-		RowsFrame.TopImage = "";
-		RowsFrame.CanvasSize = UDim2.new(0, 0, 0, 0);
-
-		RowsLayout.Parent = RowsFrame;
-		RowsLayout.SortOrder = Enum.SortOrder.LayoutOrder;
-		RowsLayout.Padding = UDim.new(0, 4);
-
-		RowsLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
-			RowsFrame.CanvasSize = UDim2.fromOffset(0, RowsLayout.AbsoluteContentSize.Y);
-		end);
-
-		local function RenderHistory()
-			for _, Child in ipairs(RowsFrame:GetChildren()) do
-				if Child:IsA("Frame") then Child:Destroy(); end;
-			end;
-
-			if #History == 0 then
-				local Empty = Instance.new("TextLabel");
-				Empty.Parent = RowsFrame;
-				Empty.BackgroundTransparency = 1;
-				Empty.Size = UDim2.new(1, 0, 0, 40);
-				Empty.Font = Enum.Font.GothamMedium;
-				Empty.Text = "No notifications yet";
-				Empty.TextColor3 = Compkiller.Colors.SwitchColor;
-				Empty.TextTransparency = 0.5;
-				Empty.TextSize = 12;
-				table.insert(Compkiller.Elements.SwitchColor, { Element = Empty, Property = "TextColor3" });
-				return;
-			end;
-
-			for i, Entry in ipairs(History) do
-				local Row = Instance.new("Frame");
-				Row.Parent = RowsFrame;
-				Row.BackgroundColor3 = Compkiller.Colors.DropColor;
-				Row.BackgroundTransparency = 0.3;
-				Row.BorderSizePixel = 0;
-				Row.Size = UDim2.new(1, 0, 0, 46);
-				Row.ZIndex = 501;
-				Row.LayoutOrder = i;
-				table.insert(Compkiller.Elements.DropColor, { Element = Row, Property = "BackgroundColor3" });
-
-				local RowCorner = Instance.new("UICorner");
-				RowCorner.CornerRadius = UDim.new(0, 5);
-				RowCorner.Parent = Row;
-
-				local TitleLabel = Instance.new("TextLabel");
-				TitleLabel.Parent = Row;
-				TitleLabel.BackgroundTransparency = 1;
-				TitleLabel.Position = UDim2.new(0, 8, 0, 4);
-				TitleLabel.Size = UDim2.new(1, -70, 0, 16);
-				TitleLabel.ZIndex = 502;
-				TitleLabel.Font = Enum.Font.GothamMedium;
-				TitleLabel.Text = Entry.Title .. ((Entry.Count > 1) and (" ×" .. Entry.Count) or "");
-				TitleLabel.TextColor3 = Compkiller.Colors.SwitchColor;
-				TitleLabel.TextSize = 12;
-				TitleLabel.TextXAlignment = Enum.TextXAlignment.Left;
-				TitleLabel.TextTruncate = Enum.TextTruncate.AtEnd;
-				table.insert(Compkiller.Elements.SwitchColor, { Element = TitleLabel, Property = "TextColor3" });
-
-				local TimeLabel = Instance.new("TextLabel");
-				TimeLabel.Parent = Row;
-				TimeLabel.BackgroundTransparency = 1;
-				TimeLabel.AnchorPoint = Vector2.new(1, 0);
-				TimeLabel.Position = UDim2.new(1, -8, 0, 4);
-				TimeLabel.Size = UDim2.new(0, 55, 0, 16);
-				TimeLabel.ZIndex = 502;
-				TimeLabel.Font = Enum.Font.Gotham;
-				TimeLabel.Text = Compkiller:GetTimeNow(Entry.Time);
-				TimeLabel.TextColor3 = Compkiller.Colors.SwitchColor;
-				TimeLabel.TextTransparency = 0.5;
-				TimeLabel.TextSize = 11;
-				TimeLabel.TextXAlignment = Enum.TextXAlignment.Right;
-				table.insert(Compkiller.Elements.SwitchColor, { Element = TimeLabel, Property = "TextColor3" });
-
-				local ContentLabel = Instance.new("TextLabel");
-				ContentLabel.Parent = Row;
-				ContentLabel.BackgroundTransparency = 1;
-				ContentLabel.Position = UDim2.new(0, 8, 0, 21);
-				ContentLabel.Size = UDim2.new(1, -16, 0, 22);
-				ContentLabel.ZIndex = 502;
-				ContentLabel.Font = Enum.Font.Gotham;
-				ContentLabel.Text = Entry.Content;
-				ContentLabel.TextColor3 = Compkiller.Colors.SwitchColor;
-				ContentLabel.TextTransparency = 0.5;
-				ContentLabel.TextSize = 11;
-				ContentLabel.TextWrapped = true;
-				ContentLabel.TextXAlignment = Enum.TextXAlignment.Left;
-				ContentLabel.TextYAlignment = Enum.TextYAlignment.Top;
-				table.insert(Compkiller.Elements.SwitchColor, { Element = ContentLabel, Property = "TextColor3" });
-			end;
-		end;
-
-		Compkiller:_Input(HistoryButton, function()
-			HistoryPanel.Visible = not HistoryPanel.Visible;
-
-			if HistoryPanel.Visible then
-				RenderHistory();
-			end;
-		end);
-
-		table.insert(Compkiller._OutsideClickWatchers, function()
-			if HistoryPanel.Visible
-				and not Compkiller:_IsMouseOverFrame(HistoryPanel)
-				and not Compkiller:_IsMouseOverFrame(HistoryButton) then
-				HistoryPanel.Visible = false;
-			end;
-		end);
-	end;
 
 	return Compkiller.NOTIFY_CACHE;
 end;
