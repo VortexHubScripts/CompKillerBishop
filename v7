@@ -11,6 +11,8 @@
     	Compkiller:OptimizeMode(< boolean >)
   	- Added Auto Color Logo
 		Compkiller:CustomIconHighlight()
+	- Added AutoGameFolder to ConfigManager
+		Compkiller:ConfigManager({ Directory = "Bishop", AutoGameFolder = true })
 --]]
 
 --- Export Types ---
@@ -27,7 +29,8 @@ export type Window = {
 
 export type ConfigManager = {
 	Directory: string,
-	Config: string,
+	Config: string?,
+	AutoGameFolder: boolean?,
 };
 
 export type WriteConfig = {
@@ -360,6 +363,7 @@ local TextService: TextService = cloneref(game:GetService('TextService'));
 local RunService: RunService = cloneref(game:GetService('RunService'));
 local Players: Players = cloneref(game:GetService('Players'));
 local HttpService: HttpService = cloneref(game:GetService('HttpService'));
+local MarketplaceService: MarketplaceService = cloneref(game:GetService('MarketplaceService'));
 local LocalPlayer: Player = Players.LocalPlayer;
 local CoreGui: PlayerGui = (gethui and gethui()) or (get_hidden_gui and get_hidden_gui()) or cloneref(game:FindFirstChild('CoreGui')) or cloneref(LocalPlayer.PlayerGui);
 local Mouse: Mouse = LocalPlayer:GetMouse();
@@ -367,7 +371,7 @@ local CurrentCamera: Camera? = cloneref(workspace.CurrentCamera);
 
 local Compkiller = {
 	Version = '2.6',
-	Logo = "rbxassetid://120245531583106",
+	Logo = "rbxassetid://127900441281230",
 	Windows = {},
 	Scale = {
 		Window = UDim2.new(0, 485,0, 565),
@@ -376,6 +380,7 @@ local Compkiller = {
 		TabClose = 85,
 	},
 	PerformanceMode = false,
+	HideKeybindsUI = false,
 	WindowsNil = {},
 	NilFolder = Instance.new('Folder'),
 	ArcylicParent = CurrentCamera,
@@ -383,18 +388,18 @@ local Compkiller = {
 };
 
 Compkiller.Colors = {
-	Highlight       = Color3.fromRGB(88, 182, 255),   -- sky blue accent — modern & readable
-	Toggle          = Color3.fromRGB(60, 150, 230),   -- darker shade of accent for toggle state
+	Highlight       = Color3.fromRGB(168, 85, 247),   -- violet purple accent — bold & modern
+	Toggle          = Color3.fromRGB(138, 63, 210),   -- darker shade of accent for toggle state
 	Risky           = Color3.fromRGB(255, 196, 48),   -- warm amber warning
-	BGDBColor       = Color3.fromRGB(10, 12, 18),     -- deep midnight base
-	BlockColor      = Color3.fromRGB(18, 21, 32),     -- element row fill — sits above BGDBColor
-	StrokeColor     = Color3.fromRGB(42, 50, 74),     -- inner borders — clearly visible blue-gray
-	SwitchColor     = Color3.fromRGB(208, 218, 240),  -- cool off-white — easier to read than pure white
-	DropColor       = Color3.fromRGB(15, 18, 28),     -- dropdown bg — slightly darker than BlockColor
-	MouseEnter      = Color3.fromRGB(56, 68, 98),     -- hover — noticeable without being jarring
-	BlockBackground = Color3.fromRGB(22, 27, 42),     -- section panels — blue-tinted, distinct layer
-	LineColor       = Color3.fromRGB(38, 46, 68),     -- dividers — blue-tinted instead of neutral gray
-	HighStrokeColor = Color3.fromRGB(52, 63, 92),     -- panel outlines — visible depth
+	BGDBColor       = Color3.fromRGB(8, 6, 12),       -- near-black base with a purple tint
+	BlockColor      = Color3.fromRGB(16, 12, 22),     -- element row fill — sits above BGDBColor
+	StrokeColor     = Color3.fromRGB(45, 32, 62),     -- inner borders — clearly visible violet-gray
+	SwitchColor     = Color3.fromRGB(222, 210, 235),  -- cool off-white — easier to read than pure white
+	DropColor       = Color3.fromRGB(12, 9, 18),      -- dropdown bg — slightly darker than BlockColor
+	MouseEnter      = Color3.fromRGB(58, 40, 82),     -- hover — noticeable without being jarring
+	BlockBackground = Color3.fromRGB(24, 17, 34),     -- section panels — purple-tinted, distinct layer
+	LineColor       = Color3.fromRGB(40, 28, 58),     -- dividers — purple-tinted instead of neutral gray
+	HighStrokeColor = Color3.fromRGB(58, 40, 84),     -- panel outlines — visible depth
 };
 
 Compkiller.Elements = {
@@ -1516,6 +1521,108 @@ function Compkiller:_IsMouseOverFrame(Frame : Frame) : boolean
 	end;
 end;
 
+-- Shared dispatcher for "close on click outside" style widgets (dropdowns, option
+-- lists, etc). Each such widget used to register its own UserInputService.InputBegan
+-- connection; on a panel with ~200 interactive elements that meant the engine had to
+-- invoke a separate connection for every single click/touch anywhere in the game
+-- (including in-game combat clicks), which showed up as a dominant UIS:InputBeganChangedEnd
+-- cost in the profiler. Consolidating into one connection that loops a registry keeps
+-- the exact same per-widget logic (each registered watcher is the original closure body,
+-- unchanged) but cuts the number of engine-level connections from N down to 1.
+Compkiller._OutsideClickWatchers = {};
+
+UserInputService.InputBegan:Connect(function(Input)
+	if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+		for _, watcher in ipairs(Compkiller._OutsideClickWatchers) do
+			watcher();
+		end;
+	end;
+end);
+
+-- Same idea as above, but for widgets whose outside-click check also cares about
+-- right-click (MouseButton2) — kept as a separate list/connection rather than adding
+-- MouseButton2 to the dispatcher above, since that dispatcher's existing watchers
+-- (dropdowns, color pickers) never fired on right-click before and shouldn't start now.
+-- This is the one every AddToggle/AddSlider's auto-attached keybind panel uses
+-- (see _KeybindHandler) — with 100+ toggles/sliders on a busy panel, this was by far
+-- the largest source of per-click InputBegan connections.
+Compkiller._OutsideClickWatchersRightClick = {};
+
+UserInputService.InputBegan:Connect(function(Input)
+	if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.MouseButton2 or Input.UserInputType == Enum.UserInputType.Touch then
+		for _, watcher in ipairs(Compkiller._OutsideClickWatchersRightClick) do
+			watcher();
+		end;
+	end;
+end);
+
+-- Consolidated dispatcher for AutoKeybind triggers (the Hold/Toggle/On keybind
+-- panel attached to every AddToggle/AddSlider via _KeybindHandler). Each one
+-- used to open its own InputBegan+InputEnded connection — on a panel with
+-- 100+ keybindable elements that's 200+ live connections evaluated on every
+-- key press and mouse click in the game, same problem as the outside-click
+-- watchers above. One shared pair of connections + registry keeps identical
+-- per-keybind logic while cutting that down to 2.
+Compkiller._KeybindTriggers = {};
+
+UserInputService.InputBegan:Connect(function(Input, GameProcessed)
+	if GameProcessed then return end; -- e.g. typing in a textbox shouldn't fire keybinds
+
+	for _, trigger in ipairs(Compkiller._KeybindTriggers) do
+		trigger.Began(Input);
+	end;
+end);
+
+UserInputService.InputEnded:Connect(function(Input)
+	for _, trigger in ipairs(Compkiller._KeybindTriggers) do
+		trigger.Ended(Input);
+	end;
+end);
+
+-- Same consolidation as the two dispatchers above, for _AddDragBlacklist (called
+-- once per control — sliders, buttons, tabs, sections, color pickers, dropdowns,
+-- textboxes, labels — effectively everything). Each call used to open its own
+-- global UserInputService.InputChanged connection that ran an AbsolutePosition/
+-- AbsoluteSize mouse-hit check on every mouse movement, not just clicks — with
+-- 150-300 controls on a busy panel this was a bigger source of per-frame/per-move
+-- cost than the InputBegan dispatchers above, since it fires on every mouse move,
+-- not just presses. One shared connection + registry, same per-widget logic.
+Compkiller._DragBlacklistWatchers = {};
+
+UserInputService.InputChanged:Connect(function()
+	for _, watcher in ipairs(Compkiller._DragBlacklistWatchers) do
+		watcher();
+	end;
+end);
+
+-- Same consolidation, for AddSlider's mouse-drag tracking. Each slider used to
+-- open its own global UserInputService.InputChanged connection to track mouse
+-- movement while its bar was held (the IsHold check already guarded the actual
+-- work, but the engine still had to invoke every slider's callback on every
+-- mouse move to even reach that check) — with 50-150 sliders on a busy panel
+-- this was another dominant per-move cost. One shared connection + registry,
+-- same per-slider IsHold-guarded logic.
+Compkiller._SliderDragWatchers = {};
+
+UserInputService.InputChanged:Connect(function(Input)
+	for _, watcher in ipairs(Compkiller._SliderDragWatchers) do
+		watcher(Input);
+	end;
+end);
+
+-- Same consolidation, for AddTextBox's Space-key re-insertion workaround (see
+-- the comment at its registration site). Each textbox used to open its own
+-- global UserInputService.InputBegan connection that fired on every keypress
+-- anywhere in the game just to check "is this Space and is MY textbox focused".
+-- One shared connection + registry, same per-textbox logic.
+Compkiller._TextBoxSpaceWatchers = {};
+
+UserInputService.InputBegan:Connect(function(Input, GameProcessed)
+	for _, watcher in ipairs(Compkiller._TextBoxSpaceWatchers) do
+		watcher(Input, GameProcessed);
+	end;
+end);
+
 function Compkiller:_Rounding(num: number, numDecimalPlaces: number) : number
 	local mult: number = 10 ^ (numDecimalPlaces or 0);
 	return math.floor(num * mult + 0.5) / mult;
@@ -1542,6 +1649,41 @@ function Compkiller:_Input(Frame : Frame , Callback : () -> ()) : TextButton
 	end;
 
 	return Button;
+end;
+
+-- Reusable double-click-to-confirm arming, extracted from the Config panel's
+-- delete button (first click arms + notifies, a second click within the window
+-- confirms; letting the window lapse disarms). Wrap any callback with this
+-- instead of reimplementing the timer/state per element.
+-- Callback is invoked as Callback(confirmed: boolean, ...) on every click, so
+-- callers can drive their own "armed" visuals off the false call the same way
+-- the Config delete button drives DelButton.ImageTransparency off it.
+function Compkiller:ArmConfirm(Callback : (boolean , ...any) -> () , Window : number?) : (...any) -> ()
+	Window = Window or 0.6;
+
+	local _lastClick = 0;
+
+	return function(...)
+		local now = tick();
+
+		if now - _lastClick <= Window then
+			_lastClick = 0;
+
+			if Callback then Callback(true , ...); end;
+		else
+			_lastClick = now;
+
+			if Callback then Callback(false , ...); end;
+
+			task.delay(Window, function()
+				if _lastClick == now then
+					_lastClick = 0;
+
+					if Callback then Callback(nil , ...); end; -- disarmed by timeout, no click
+				end;
+			end);
+		end;
+	end;
 end;
 
 function Compkiller:GetCalculatePosition(planePos: number, planeNormal: number, rayOrigin: number, rayDirection: number) : number
@@ -1609,7 +1751,7 @@ function Compkiller:_AddDragBlacklist(Frame: Frame)
 		SET_BLACKLIST(false);
 	end);
 
-	UserInputService.InputChanged:Connect(function()
+	table.insert(Compkiller._DragBlacklistWatchers, function()
 		if not Compkiller:_IsMouseOverFrame(Frame) then
 			SET_BLACKLIST(false);
 		end
@@ -1694,16 +1836,20 @@ function Compkiller:Drag(InputFrame: Frame, MoveFrame: Frame, Speed : number)
 	local dragToggle: boolean = false;
 	local dragStart: Vector3 = nil;
 	local startPos: UDim2 = nil;
-	local Tween = TweenInfo.new(Speed);
 
+	-- Previously this tweened MoveFrame to the new position on every single
+	-- InputChanged event. Mouse-move fires far more often than once per frame,
+	-- so each move spawned a brand new TweenService tween that immediately
+	-- superseded the still-running previous one — the frame was perpetually
+	-- chasing a moving target through dozens of abandoned partial tweens,
+	-- which is what read as "laggy"/rubber-banding while dragging. Setting
+	-- Position directly makes the drag track the cursor 1:1 with no lag.
 	local updateInput = function(input)
 		local delta = input.Position - dragStart;
 		local position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
 			startPos.Y.Scale, startPos.Y.Offset + delta.Y);
 
-		Compkiller:_Animation(MoveFrame,Tween,{
-			Position = position
-		});
+		MoveFrame.Position = position;
 	end;
 
 	InputFrame.InputBegan:Connect(function(input)
@@ -2094,12 +2240,44 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 
 		Signal:Connect(ToggleUI);
 
+		-- Visual "listening for input" state while a rebind is in progress —
+		-- pulses the stroke between the accent color and idle color so it's
+		-- obvious the box is actively capturing the next key press.
+		local Capturing = false;
+
+		local SetCapturing = function(bool)
+			Capturing = bool;
+
+			if bool then
+				task.spawn(function()
+					local Lit = false;
+
+					while Capturing do
+						Lit = not Lit;
+
+						Compkiller:_Animation(UIStroke,TweenInfo.new(0.35,Enum.EasingStyle.Sine),{
+							Color = Lit and Compkiller.Colors.Highlight or Compkiller.Colors.HighStrokeColor,
+							Transparency = Lit and 0 or 0.5,
+						});
+
+						task.wait(0.35);
+					end;
+
+					Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
+						Color = Compkiller.Colors.HighStrokeColor,
+						Transparency = 0,
+					});
+				end);
+			end;
+		end;
+
 		return {
 			SetValue = function(text)
 				TextLabel.Text = GetItem(text or "None");
 
 				Update();
 			end,
+			SetCapturing = SetCapturing,
 			Root = Keybind,
 		};
 	elseif Name == "Helper" then
@@ -2794,6 +2972,17 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 
 		Args.IsVisible = bool;
 
+		-- IsSame was computed but never checked, so this ran its full ~15-tween
+		-- animation sequence on every call regardless of whether anything was
+		-- actually changing — including every redundant ToggleUI(false) fired
+		-- by the outside-click watcher on EVERY click in the game (dropdowns/
+		-- color pickers register one of those each), even while already closed.
+		-- With dozens of color pickers in a busy panel that was hundreds of
+		-- no-op tweens created per click. Skip entirely when nothing changes,
+		-- matching the same guard already used by the AddToggle/AddSlider
+		-- keybind panel's ToggleUI above.
+		if IsSame then return end;
+
 		local MainPosition = UDim2.new(0,Button.AbsolutePosition.X + 95,0,Button.AbsolutePosition.Y + 65);
 		local DropPosition = UDim2.new(0,MainPosition.X.Offset,0,MainPosition.Y.Offset + 15);
 
@@ -3069,11 +3258,9 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		end;
 	end)
 
-	UserInputService.InputBegan:Connect(function(Input)
-		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-			if not Compkiller:_IsMouseOverFrame(ColorPickerWindow) then
-				ToggleUI(false);
-			end;
+	table.insert(Compkiller._OutsideClickWatchers, function()
+		if not Compkiller:_IsMouseOverFrame(ColorPickerWindow) then
+			ToggleUI(false);
 		end;
 	end)
 
@@ -3281,6 +3468,16 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 
 	Ref.THREAD = task.spawn(function()
 		while true do task.wait()
+			if Compkiller.HideKeybindsUI then
+				Keybinds.Visible = false;
+
+				if Compkiller.PerformanceMode then
+					Compkiller:_SetNilP(Keybinds , nil);
+				end;
+
+				continue;
+			end;
+
 			Compkiller:_Animation(MainFrame,TweenInfo.new(0.4),{
 				Size = UDim2.new(1, 30, 1, UIListLayout.AbsoluteContentSize.Y + 1)
 			});
@@ -3582,27 +3779,40 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 
 	task.delay(0.1,refreshPF);
 
+	-- Starts at nil (not false) so the very first ToggleUI(false) call below —
+	-- which sets the frame's real initial closed state — always runs unguarded,
+	-- same as before this change. Only later redundant calls (e.g. re-closing an
+	-- already-closed panel on every outside click) get skipped.
+	local _kbLastState = nil;
+
 	local ToggleUI = function(bool)
+		local IsSame = _kbLastState == bool;
+		_kbLastState = bool;
+
 		if bool then
 			KeybindHandler.Position = UDim2.new(0,Parent.AbsolutePosition.X + 225,0,Parent.AbsolutePosition.Y)
 
-			Compkiller:_Animation(KeybindHandler,TweenInfo.new(0.25),{
-				BackgroundTransparency = 0,
-				Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y + 5)
-			});
+			if not IsSame then
+				Compkiller:_Animation(KeybindHandler,TweenInfo.new(0.25),{
+					BackgroundTransparency = 0,
+					Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y + 5)
+				});
 
-			Compkiller:_Animation(UIStroke,TweenInfo.new(0.3),{
-				Transparency = 0
-			});
+				Compkiller:_Animation(UIStroke,TweenInfo.new(0.3),{
+					Transparency = 0
+				});
+			end;
 		else
-			Compkiller:_Animation(KeybindHandler,TweenInfo.new(0.3),{
-				BackgroundTransparency = 1,
-				Size = UDim2.new(0, 225, 0, 0)
-			});
+			if not IsSame then
+				Compkiller:_Animation(KeybindHandler,TweenInfo.new(0.3),{
+					BackgroundTransparency = 1,
+					Size = UDim2.new(0, 225, 0, 0)
+				});
 
-			Compkiller:_Animation(UIStroke,TweenInfo.new(0.3),{
-				Transparency = 1
-			});
+				Compkiller:_Animation(UIStroke,TweenInfo.new(0.3),{
+					Transparency = 1
+				});
+			end;
 		end;
 	end;
 
@@ -3617,37 +3827,23 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 
 	KB_Signal:Connect(ToggleUI);
 
+	-- Simplified to just Key + Mode. On/Off used to be user-configurable (a
+	-- leftover from also supporting Slider elements here), but this handler is
+	-- Toggle-only now, so they're just the two boolean states — no UI needed.
+	-- The display name (shown in the on-screen keybinds list) is always the
+	-- toggle's own label; it used to be separately overridable but that's gone
+	-- too, along with the unused legacy Off/On-only modes (never reachable from
+	-- the dropdown, which only ever offered Hold/Toggle).
 	local APIRef = {
-		Name = ElementAPI:GetText()
+		Name = ElementAPI:GetText(),
+		Off = false,
+		On = true,
+		Keybind = nil,
+		Mode = 1, -- 1 = Hold, 2 = Toggle
 	};
 
-	local ModeEnum = {
-		[1] = 'Off', -- disabled / off
-		[2] = "Hold",
-		[3] = "Toggle",
-		[4] = "On", -- alway on
-	};
-
-	local e_m = {
-		['Off'] = 1,
-		['Hold'] = 2,
-		['Toggle'] = 3,
-		['On'] = 4,
-	};
-
-	if ObjectType == "Toggle" then
-		APIRef.Off = false;
-		APIRef.On = true;
-		APIRef.Keybind = nil;
-		APIRef.Mode = e_m.Off;
-
-
-	elseif ObjectType == "Number" then
-		APIRef.Off = 1;
-		APIRef.On = 0;
-		APIRef.Keybind = nil;
-		APIRef.Mode = e_m.Off;
-	end;
+	local ModeEnum = { [1] = "Hold", [2] = "Toggle" };
+	local e_m = { ['Hold'] = 1, ['Toggle'] = 2 };
 
 	local Flag = {};
 
@@ -3667,94 +3863,36 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 	});
 
 	Flag.Mode = ElementAPIs:AddDropdown({
-		Name = "Mode",
+		Name = "",
 		Default = ModeEnum[APIRef.Mode],
-		Values = ModeEnum,
+		Values = {"Hold", "Toggle"},
 		Callback = function(v)
 			APIRef.Mode = e_m[v];
-
-			if APIRef.Mode == 4 then
-				ElementAPI:SetValue(APIRef.On);
-			end;
 		end,
 	});
-
-	if ObjectType == "Toggle" then
-		Flag.On = ElementAPIs:AddToggle({
-			Name = "ON Value",
-			Default = APIRef.On,
-			Callback = function(v)
-				APIRef.On = v;
-			end,
-		});
-
-		Flag.Off = ElementAPIs:AddToggle({
-			Name = "OFF Value",
-			Default = APIRef.Off,
-			Callback = function(v)
-				APIRef.Off = v;
-			end,
-		});
-	elseif ObjectType == "Number" then
-		Flag.On = ElementAPIs:AddSlider({
-			Name = "ON Value",
-			Default = APIRef.On,
-			Min = ElementCFG.Min,
-			Round = ElementCFG.Round,
-			Max = ElementCFG.Max,
-			Type = ElementCFG.Type,
-			Callback = function(v)
-				APIRef.On = v;
-			end,
-		});
-
-		Flag.Off = ElementAPIs:AddSlider({
-			Name = "OFF Value",
-			Default = APIRef.Off,
-			Min = ElementCFG.Min,
-			Round = ElementCFG.Round,
-			Max = ElementCFG.Max,
-			Type = ElementCFG.Type,
-			Callback = function(v)
-				APIRef.Off = v;
-			end,
-		});
-	end;
-
-	Flag.ShowInKeybindList = ElementAPIs:AddTextBox({
-		Name = "Name",
-		Default = APIRef.Name,
-		Placeholder = "Keybind Name",
-		Callback = function(v)
-			APIRef.Name = v;
-		end,
-	})
 
 	function APIRef:GetSettings()
 		APIRef.Update();
 
 		return {
 			Key = APIRef.Keybind,
-			On = APIRef.On,
-			Off = APIRef.Off,
 			Mode = APIRef.Mode,
-			Name = APIRef.Name,
 		};
 	end;
 
 	function APIRef:LoadSettings(cfg : KeybindSettings)
-		Flag.ShowInKeybindList:SetValue(cfg.Name);
-		Flag.Off:SetValue(cfg.Off);
-		Flag.On:SetValue(cfg.On);
 		Flag.Mode:SetValue(ModeEnum[cfg.Mode]);
 		Flag.Key:SetValue(cfg.Key);
 
 		APIRef.Update();
 	end;
 
+	-- Suppress the "currently on" badge while in Hold mode: the value trivially
+	-- tracks the physical key state there, so the indicator is redundant and
+	-- only useful for Toggle mode (where the state persists after release).
 	APIRef.Thread = task.spawn(function()
 		while true do task.wait(0.25)
-			if APIRef.Mode ~= 1 then
+			if APIRef.Keybind and APIRef.Mode ~= 1 then
 				if ElementAPI:GetValue() == APIRef.On then
 					KeybindFrame:SetVisible(true);
 				else
@@ -3774,39 +3912,47 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 		end;
 	end);
 
-	UserInputService.InputBegan:Connect(function(Input)
-		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.MouseButton2 or Input.UserInputType == Enum.UserInputType.Touch then
-			if not Compkiller:_IsMouseOverFrame(Parent) and not Compkiller:_IsMouseOverFrame(KeybindHandler) then
-				KB_Signal:Fire(false);
-			end;
+	table.insert(Compkiller._OutsideClickWatchersRightClick, function()
+		-- The Mode dropdown's option list is a floating popup parented to the
+		-- Window itself, not to KeybindHandler — clicking an option in it is
+		-- visually "inside" this panel's UI but geometrically outside both
+		-- Parent and KeybindHandler, so it has to be checked separately or
+		-- selecting an option closes the whole panel out from under you.
+		if not Compkiller:_IsMouseOverFrame(Parent)
+			and not Compkiller:_IsMouseOverFrame(KeybindHandler)
+			and not (Flag.Mode.DropdownRoot and Compkiller:_IsMouseOverFrame(Flag.Mode.DropdownRoot)) then
+			KB_Signal:Fire(false);
 		end;
 	end);
 
-	UserInputService.InputBegan:Connect(function(Input,Typing)
-		if Input.KeyCode.Name == APIRef.Keybind or Input.KeyCode == APIRef.Keybind or (Input.UserInputType == Enum.UserInputType.MouseButton1 and APIRef.Keybind == "MouseLeft") or (Input.UserInputType == Enum.UserInputType.MouseButton2 and APIRef.Keybind == "MouseRight") then
+	local function Matches(Input)
+		return Input.KeyCode.Name == APIRef.Keybind or Input.KeyCode == APIRef.Keybind or (Input.UserInputType == Enum.UserInputType.MouseButton1 and APIRef.Keybind == "MouseLeft") or (Input.UserInputType == Enum.UserInputType.MouseButton2 and APIRef.Keybind == "MouseRight");
+	end;
 
-			if APIRef.Mode == 2 or APIRef.Mode == 4 then
+	-- Hold: on while the key is physically down, off the moment it's released.
+	-- Toggle: each press flips the current state; release does nothing.
+	table.insert(Compkiller._KeybindTriggers, {
+		Began = function(Input)
+			if not APIRef.Keybind or not Matches(Input) then return end;
+
+			if APIRef.Mode == 1 then -- Hold
 				ElementAPI:SetValue(APIRef.On);
-			elseif APIRef.Mode == 3 then
+			elseif APIRef.Mode == 2 then -- Toggle
 				if ElementAPI:GetValue() == APIRef.On then
 					ElementAPI:SetValue(APIRef.Off);
 				else
 					ElementAPI:SetValue(APIRef.On);
 				end;
 			end;
-		end;
-	end);
+		end,
+		Ended = function(Input)
+			if not APIRef.Keybind or not Matches(Input) then return end;
 
-	UserInputService.InputEnded:Connect(function(Input,Typing)
-		if Input.KeyCode.Name == APIRef.Keybind or Input.KeyCode == APIRef.Keybind or (Input.UserInputType == Enum.UserInputType.MouseButton1 and APIRef.Keybind == "MouseLeft") or (Input.UserInputType == Enum.UserInputType.MouseButton2 and APIRef.Keybind == "MouseRight") then
-
-			if APIRef.Mode == 2 then
+			if APIRef.Mode == 1 then -- Hold
 				ElementAPI:SetValue(APIRef.Off);
-			elseif APIRef.Mode == 4 then
-				ElementAPI:SetValue(APIRef.On);
 			end;
-		end;
-	end);
+		end,
+	});
 
 	return APIRef;
 end;
@@ -3844,14 +3990,19 @@ function Compkiller:_LoadOption(Value , TabSignal)
 				return;
 			end;
 
+			IsBinding = true;
+
 			Keybind.SetValue("...");
+			Keybind.SetCapturing(true);
 
-			local Selected = nil;
+			local Selected, Cancelled = nil, false;
 
-			while not Selected do
+			while not Selected and not Cancelled do
 				local Key = UserInputService.InputBegan:Wait();
 
-				if Key.KeyCode ~= Enum.KeyCode.Unknown and not IsBlacklist(Key.KeyCode) and not IsBlacklist(Key.KeyCode.Name) then
+				if Key.KeyCode == Enum.KeyCode.Escape then
+					Cancelled = true;
+				elseif Key.KeyCode ~= Enum.KeyCode.Unknown and not IsBlacklist(Key.KeyCode) and not IsBlacklist(Key.KeyCode.Name) then
 					Selected = Key.KeyCode;
 				else
 					if Key.UserInputType == Enum.UserInputType.MouseButton1 and not IsBlacklist(Enum.UserInputType.MouseButton1) and not IsBlacklist("MouseLeft") then
@@ -3862,15 +4013,29 @@ function Compkiller:_LoadOption(Value , TabSignal)
 				end;
 			end;
 
+			Keybind.SetCapturing(false);
+			IsBinding = false;
+
+			if Cancelled then
+				-- Escape clears the keybind rather than snapping back to whatever
+				-- was bound before — reflect that in the box (was left showing
+				-- "..." from capture start instead of "None").
+				Config.Default = nil;
+
+				Keybind.SetValue(nil);
+
+				if Config.Callback then Config.Callback(nil); end;
+
+				return;
+			end;
+
 			local KeyName = (typeof(Selected) == "string" and Selected) or Selected.Name;
 
 			Config.Default = KeyName;
 
 			Keybind.SetValue(Selected);
 
-			IsBinding = false;
-
-			Config.Callback(KeyName);
+			if Config.Callback then Config.Callback(KeyName); end;
 		end);
 
 		local Args = {};
@@ -3882,7 +4047,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			Keybind.SetValue(Config.Default);
 
-			Config.Callback(Config.Default);
+			if Config.Callback then Config.Callback(Config.Default); end;
 		end;
 
 		function Args:GetValue()
@@ -4004,7 +4169,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			ColorFrame.BackgroundColor3 = color;
 			ColorFrame.BackgroundTransparency = opc;
 
-			Config.Callback(Config.Default , Config.Transparency);
+			if Config.Callback then Config.Callback(Config.Default , Config.Transparency); end;
 		end);
 
 		ColorPicker:SetColor(Config.Default,Config.Transparency);
@@ -4022,7 +4187,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			ColorPicker:Update()
 
-			Config.Callback(value,opc);
+			if Config.Callback then Config.Callback(value,opc); end;
 		end;
 
 		function Args:GetValue()
@@ -4055,7 +4220,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			Toggle.ChangeValue(Config.Default);
 
-			Config.Callback(Config.Default);
+			if Config.Callback then Config.Callback(Config.Default); end;
 		end);
 
 		local Args = {};
@@ -4067,7 +4232,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			Toggle.ChangeValue(Config.Default);
 
-			task.spawn(Config.Callback, Config.Default);
+			if Config.Callback then task.spawn(Config.Callback, Config.Default); end;
 		end;
 
 		function Args:GetValue()
@@ -4116,30 +4281,32 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 				if not IsSameValue then
 					ExtractElement.Position = DropPosition
+
+					Compkiller:_Animation(ExtractElement , Tween , {
+						Position = MainPosition,
+						BackgroundTransparency = 0,
+						Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y)
+					});
+
+					Compkiller:_Animation(UIStroke , Tween , {
+						Transparency = 0
+					});
 				end;
-
-				Compkiller:_Animation(ExtractElement , Tween , {
-					Position = MainPosition,
-					BackgroundTransparency = 0,
-					Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y)
-				});
-
-				Compkiller:_Animation(UIStroke , Tween , {
-					Transparency = 0
-				});
 
 			else
 				Signal:Fire(false);
 
-				Compkiller:_Animation(ExtractElement , Tween , {
-					Position = DropPosition,
-					BackgroundTransparency = 1,
-					Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y - 10)
-				});
+				if not IsSameValue then
+					Compkiller:_Animation(ExtractElement , Tween , {
+						Position = DropPosition,
+						BackgroundTransparency = 1,
+						Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y - 10)
+					});
 
-				Compkiller:_Animation(UIStroke , Tween , {
-					Transparency = 1
-				});
+					Compkiller:_Animation(UIStroke , Tween , {
+						Transparency = 1
+					});
+				end;
 			end;
 		end;
 
@@ -4211,16 +4378,19 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			end;
 		end;
 
-		Element.MouseButton1Click:Connect(function()
-			ToggleUI(true);
+		-- InputBegan (press) instead of MouseButton1Click (press+matching release) so the
+		-- open never silently drops when the release lands a frame after something else on
+		-- screen reflows the panel out from under the cursor.
+		Element.InputBegan:Connect(function(Input)
+			if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+				ToggleUI(not Toggl);
+			end;
 		end);
 
-		UserInputService.InputBegan:Connect(function(Input)
-			if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-				if Toggl and not Compkiller:_IsMouseOverFrame(ExtractElement) and not Compkiller:_IsMouseOverFrame(Element) then
-					ToggleUI(false);
-				end;
-			end
+		table.insert(Compkiller._OutsideClickWatchers, function()
+			if Toggl and not Compkiller:_IsMouseOverFrame(ExtractElement) and not Compkiller:_IsMouseOverFrame(Element) then
+				ToggleUI(false);
+			end;
 		end)
 
 		return Compkiller:_LoadElement(Elements , true , Signal)
@@ -4342,25 +4512,34 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 				DropdownWindow.Position = DropPosition;
 			end;
 
-			Compkiller:_Animation(DropdownWindow,TweenInfo.new(0.2),{
-				BackgroundTransparency = 0,
-				Position = MainPosition,
-				Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, (GetOpenHeight and GetOpenHeight()) or math.clamp(UIListLayout.AbsoluteContentSize.Y + 10,10 , 200))
-			})
+			-- Skip re-tweening to values that are already current: ToggleUI(bool) is
+			-- called unconditionally on every outside click (see the InputBegan
+			-- listener below), including when the dropdown is already in this state,
+			-- so without this guard every click anywhere replays these two tweens
+			-- for every dropdown on the panel.
+			if not IsSame then
+				Compkiller:_Animation(DropdownWindow,TweenInfo.new(0.2),{
+					BackgroundTransparency = 0,
+					Position = MainPosition,
+					Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, (GetOpenHeight and GetOpenHeight()) or math.clamp(UIListLayout.AbsoluteContentSize.Y + 10,10 , 200))
+				})
 
-			Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
-				Transparency = 0
-			})
+				Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
+					Transparency = 0
+				})
+			end;
 		else
-			Compkiller:_Animation(DropdownWindow,TweenInfo.new(0.2),{
-				BackgroundTransparency = 1,
-				Position = DropPosition,
-				Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, math.clamp(UIListLayout.AbsoluteContentSize.Y / 1.5, 10 , 200))
-			})
+			if not IsSame then
+				Compkiller:_Animation(DropdownWindow,TweenInfo.new(0.2),{
+					BackgroundTransparency = 1,
+					Position = DropPosition,
+					Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, math.clamp(UIListLayout.AbsoluteContentSize.Y / 1.5, 10 , 200))
+				})
 
-			Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
-				Transparency = 1
-			})
+				Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
+					Transparency = 1
+				})
+			end;
 		end;
 	end;
 
@@ -4576,14 +4755,12 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	-- so the click handler doesn't immediately reopen the dropdown.
 	local _closedByInputBegan = false;
 
-	UserInputService.InputBegan:Connect(function(Input)
-		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-			if not Compkiller:_IsMouseOverFrame(DropdownWindow) then
-				if ToggleDb:GetValue() then
-					_closedByInputBegan = Compkiller:_IsMouseOverFrame(BaseParent);
-				end;
-				ToggleUI(false);
+	table.insert(Compkiller._OutsideClickWatchers, function()
+		if not Compkiller:_IsMouseOverFrame(DropdownWindow) then
+			if ToggleDb:GetValue() then
+				_closedByInputBegan = Compkiller:_IsMouseOverFrame(BaseParent);
 			end;
+			ToggleUI(false);
 		end;
 	end);
 
@@ -4633,7 +4810,93 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 
 	Args.EventOut = EventOut;
 
+	-- Exposes the floating option-list popup so callers embedding this dropdown
+	-- inside their own "close on outside click" panel (e.g. _KeybindHandler's
+	-- Mode dropdown) can treat clicks on it as inside their panel too — this
+	-- popup is parented straight to the Window, not to whatever contains the
+	-- dropdown button, so it's never actually inside the caller's own frame.
+	Args.Root = DropdownWindow;
+
 	return Args;
+end;
+
+-- Names to watch for the Ctrl+K global search. Wraps each Add* method on a
+-- Section's returned Args table (see TabArgs:DrawSection) so every element it
+-- creates registers itself in the window's search index using the same
+-- Config.Name the caller already passed in — no per-element instrumentation.
+Compkiller._SEARCHABLE_METHODS = {
+	"AddToggle", "AddSlider", "AddButton", "AddKeybind", "AddColorPicker",
+	"AddDropdown", "AddTextBox", "AddLabel", "AddParagraph"
+};
+
+function Compkiller:_WrapSectionSearch(WindowArgs, Args, TabName, SectionName, SelectTab, SectionFrame)
+	for _, MethodName in ipairs(Compkiller._SEARCHABLE_METHODS) do
+		local Original = Args[MethodName];
+
+		if Original then
+			Args[MethodName] = function(self, Config, ...)
+				local Result = Original(self, Config, ...);
+
+				local Name = Config and Config.Name;
+
+				if Name and Name ~= "" then
+					WindowArgs:_RegisterSearch({
+						Text = Name,
+						TabName = TabName,
+						SectionName = SectionName,
+						Kind = MethodName,
+						GoTo = function()
+							if SelectTab then SelectTab(); end;
+
+							task.defer(function()
+								task.wait(0.05);
+								Compkiller:_RevealSection(SectionFrame);
+							end);
+						end
+					});
+				end;
+
+				return Result;
+			end;
+		end;
+	end;
+
+	return Args;
+end;
+
+-- Scrolls the section's containing ScrollingFrame so it's in view, then
+-- flashes it briefly so the eye can find it after a search jump.
+function Compkiller:_RevealSection(SectionFrame: Frame)
+	local ScrollFrame = SectionFrame and SectionFrame:FindFirstAncestorWhichIsA("ScrollingFrame");
+
+	if not ScrollFrame then return; end;
+
+	local TargetY = math.max(0, (SectionFrame.AbsolutePosition.Y - ScrollFrame.AbsolutePosition.Y) + ScrollFrame.CanvasPosition.Y - 10);
+
+	TweenService:Create(ScrollFrame, TweenInfo.new(0.4, Enum.EasingStyle.Quint), {
+		CanvasPosition = Vector2.new(ScrollFrame.CanvasPosition.X, TargetY)
+	}):Play();
+
+	local Flash = Instance.new("Frame");
+	Flash.Name = Compkiller:_RandomString();
+	Flash.Parent = SectionFrame;
+	Flash.BackgroundColor3 = Compkiller.Colors.Highlight;
+	Flash.BackgroundTransparency = 0.55;
+	Flash.BorderSizePixel = 0;
+	Flash.Size = UDim2.fromScale(1, 1);
+	Flash.ZIndex = SectionFrame.ZIndex + 50;
+
+	local FlashCorner = Instance.new("UICorner");
+	FlashCorner.CornerRadius = UDim.new(0, 6);
+	FlashCorner.Parent = Flash;
+
+	TweenService:Create(Flash, TweenInfo.new(0.9, Enum.EasingStyle.Quint), {
+		BackgroundTransparency = 1
+	}):Play();
+
+	task.delay(0.9, function()
+		Flash:Destroy();
+	end);
 end;
 
 function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal , DisableStackKeybind)
@@ -4674,7 +4937,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			Block:SetTransparency((Config.Default and 0.1) or 0.3);
 
-			Config.Callback(Config.Default);
+			if Config.Callback then Config.Callback(Config.Default); end;
 		end);
 
 		local Args = {};
@@ -4688,7 +4951,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			Block:SetTransparency((Config.Default and 0.1) or 0.3);
 
-			task.spawn(Config.Callback, Config.Default);
+			if Config.Callback then task.spawn(Config.Callback, Config.Default); end;
 		end;
 
 		Args.Signal = Signal:Connect(function(bool)
@@ -4755,14 +5018,19 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 				return;
 			end;
 
+			IsBinding = true;
+
 			Keybind.SetValue("...");
+			Keybind.SetCapturing(true);
 
-			local Selected = nil;
+			local Selected, Cancelled = nil, false;
 
-			while not Selected do
+			while not Selected and not Cancelled do
 				local Key = UserInputService.InputBegan:Wait();
 
-				if Key.KeyCode ~= Enum.KeyCode.Unknown and not IsBlacklist(Key.KeyCode) and not IsBlacklist(Key.KeyCode.Name) then
+				if Key.KeyCode == Enum.KeyCode.Escape then
+					Cancelled = true;
+				elseif Key.KeyCode ~= Enum.KeyCode.Unknown and not IsBlacklist(Key.KeyCode) and not IsBlacklist(Key.KeyCode.Name) then
 					Selected = Key.KeyCode;
 				else
 					if Key.UserInputType == Enum.UserInputType.MouseButton1 and not IsBlacklist(Enum.UserInputType.MouseButton1) and not IsBlacklist("MouseLeft") then
@@ -4773,15 +5041,29 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 				end;
 			end;
 
+			Keybind.SetCapturing(false);
+			IsBinding = false;
+
+			if Cancelled then
+				-- Escape clears the keybind rather than snapping back to whatever
+				-- was bound before — reflect that in the box (was left showing
+				-- "..." from capture start instead of "None").
+				Config.Default = nil;
+
+				Keybind.SetValue(nil);
+
+				if Config.Callback then Config.Callback(nil); end;
+
+				return;
+			end;
+
 			local KeyName = typeof(Selected) == "string" and Selected or Selected.Name;
 
 			Config.Default = KeyName;
 
 			Keybind.SetValue(Selected);
 
-			IsBinding = false;
-
-			Config.Callback(KeyName);
+			if Config.Callback then Config.Callback(KeyName); end;
 		end);
 
 		local Args = {};
@@ -4801,7 +5083,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			Keybind.SetValue(Config.Default);
 
-			Config.Callback(Config.Default);
+			if Config.Callback then Config.Callback(Config.Default); end;
 		end;
 
 		Args.Signal = Signal:Connect(function(bool)
@@ -4851,7 +5133,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			ColorFrame.BackgroundColor3 = color;
 			ColorFrame.BackgroundTransparency = opc;
 
-			Config.Callback(Config.Default , Config.Transparency);
+			if Config.Callback then Config.Callback(Config.Default , Config.Transparency); end;
 		end);
 
 		ColorPicker:SetColor(Config.Default,Config.Transparency);
@@ -4868,7 +5150,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			ColorPicker:SetColor(value,opc);
 			ColorPicker:Update();
 
-			Config.Callback(value,opc);
+			if Config.Callback then Config.Callback(value,opc); end;
 		end;
 
 		function Args:SetText(str : string)
@@ -4904,7 +5186,9 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 	function Args:AddButton(Config: Button)
 		Config = Compkiller.__CONFIG(Config , {
 			Name = 'Button',
-			Callback = function() end
+			Callback = function() end,
+			Confirm = false,
+			ConfirmText = "Click again to confirm"
 		});
 
 		local Button = Instance.new("Frame")
@@ -5001,9 +5285,39 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			end;
 		end);
 
-		Compkiller:_Input(Frame,function()
-			Config.Callback();
-		end);
+		if Config.Confirm then
+			local FireConfirm = Compkiller:ArmConfirm(function(confirmed)
+				if confirmed then
+					TextLabel.Text = Config.Name;
+
+					Compkiller:_Animation(Frame, TweenInfo.new(0.2), {
+						BackgroundTransparency = 0.1
+					});
+
+					if Config.Callback then Config.Callback(); end;
+				elseif confirmed == false then -- armed by first click
+					TextLabel.Text = Config.ConfirmText;
+
+					Compkiller:_Animation(Frame, TweenInfo.new(0.2), {
+						BackgroundTransparency = 0
+					});
+				else -- disarmed by timeout
+					TextLabel.Text = Config.Name;
+
+					Compkiller:_Animation(Frame, TweenInfo.new(0.2), {
+						BackgroundTransparency = 0.1
+					});
+				end;
+			end);
+
+			Compkiller:_Input(Frame,function()
+				FireConfirm();
+			end);
+		else
+			Compkiller:_Input(Frame,function()
+				if Config.Callback then Config.Callback(); end;
+			end);
+		end;
 
 		local Args = {};
 
@@ -5081,7 +5395,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		local Frame = Instance.new("Frame")
 		local UICorner_3 = Instance.new("UICorner")
 		local UIScale = Instance.new("UIScale")
-		local ValueText = Instance.new("TextLabel")
+		local ValueText = Instance.new("TextBox")
 
 		Compkiller:_AddDragBlacklist(Slider);
 
@@ -5210,6 +5524,8 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		ValueText.TextSize = 12.000
 		ValueText.TextTransparency = 0.750
 		ValueText.TextXAlignment = Enum.TextXAlignment.Right
+		ValueText.ClearTextOnFocus = false
+		ValueText.MultiLine = false
 
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = ValueText,
@@ -5257,7 +5573,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			ValueText.Text = tostring(Config.Default)..tostring(Config.Type)
 
-			Config.Callback(Value)
+			if Config.Callback then Config.Callback(Value); end;
 		end;
 
 		do
@@ -5280,7 +5596,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 				end
 			end)
 
-			UserInputService.InputChanged:Connect(function(Input)
+			table.insert(Compkiller._SliderDragWatchers, function(Input)
 				if IsHold then
 					if (Input.UserInputType == Enum.UserInputType.MouseMovement or Input.UserInputType == Enum.UserInputType.Touch)  then
 						if UserInputService.TouchEnabled then
@@ -5297,6 +5613,50 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			end);
 		end;
 
+		-- Click the value label to type a number in directly, same clamp/increment/
+		-- round rules the drag path uses, so typed input can't land outside them.
+		local function ApplyTypedValue(raw)
+			local num = tonumber(raw);
+			if not num then return false; end;
+
+			num = math.clamp(num, Config.Min, Config.Max);
+
+			if Config.Increment and Config.Increment > 0 then
+				num = math.round(num / Config.Increment) * Config.Increment;
+				num = math.clamp(num, Config.Min, Config.Max);
+			end;
+
+			local Value = Compkiller:_Rounding(num, Config.Round);
+			local Size = (Value - Config.Min) / (Config.Max - Config.Min);
+
+			TweenService:Create(SliderInput , TweenInfo.new(0.2),{
+				Size = UDim2.new(math.clamp(Size,0.08,1), 0, 1, 0)
+			}):Play();
+
+			Config.Default = Value;
+
+			if Config.Callback then Config.Callback(Value); end;
+
+			return true;
+		end;
+
+		ValueText.Focused:Connect(function()
+			ValueText.Text = tostring(Config.Default);
+
+			task.defer(function()
+				pcall(function()
+					ValueText.CursorPosition = #ValueText.Text + 1;
+					ValueText.SelectionStart = 1;
+				end);
+			end);
+		end);
+
+		ValueText.FocusLost:Connect(function()
+			ApplyTypedValue(ValueText.Text);
+
+			ValueText.Text = tostring(Config.Default)..tostring(Config.Type);
+		end);
+
 		local Args = {};
 
 		Args.Flag = Config.Flag;
@@ -5310,7 +5670,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 				Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.08), 0, 1, 0)
 			});
 
-			Config.Callback(Value);
+			if Config.Callback then Config.Callback(Value); end;
 		end;
 
 		function Args:SetText(str : string)
@@ -5397,11 +5757,9 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			Compkiller.Flags[Config.Flag] = Args;
 		end;
 
-		if not DisableStackKeybind then
-			local AutoKeybind = Compkiller:_KeybindHandler(Slider , "Number" , Args , Signal , Zindex , Config);
-
-			Args.AutoKeybind = AutoKeybind;
-		end;
+		-- Sliders no longer get an auto-keybind panel — Hold/Toggle only make
+		-- sense as boolean semantics (Toggle elements); a numeric slider has no
+		-- clean equivalent without reintroducing configurable On/Off values.
 
 		return Args;
 	end;
@@ -5745,6 +6103,27 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		TextBox_2.Text = Config.Default
 		TextBox_2.TextColor3 = Compkiller.Colors.SwitchColor
 		TextBox_2.TextSize = 11.000
+		TextBox_2.Selectable = false
+
+		-- Roblox's gamepad/console GUI navigation treats Space as the
+		-- "activate selected object" button. If GuiService has any
+		-- Selectable GuiObject focused (can happen on PC too, e.g. after
+		-- Tab-navigation), it intercepts the Space keystroke for that
+		-- system instead of letting it reach this focused TextBox, so the
+		-- space character never gets typed. Manually re-insert it when
+		-- that happens.
+		table.insert(Compkiller._TextBoxSpaceWatchers, function(Input, GameProcessed)
+			if GameProcessed then return end
+			if Input.KeyCode ~= Enum.KeyCode.Space then return end
+			if not TextBox_2:IsFocused() then return end
+
+			local pos = TextBox_2.CursorPosition
+			if pos == -1 then pos = #TextBox_2.Text + 1 end
+
+			local text = TextBox_2.Text
+			TextBox_2.Text = text:sub(1, pos - 1) .. " " .. text:sub(pos)
+			TextBox_2.CursorPosition = pos + 1
+		end)
 
 		table.insert(Compkiller.Elements.SwitchColor,{
 			Element = TextBox_2,
@@ -5815,7 +6194,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 				TextBox_2.Text = tostring(value);
 
-				task.spawn(Config.Callback,value);
+				if Config.Callback then task.spawn(Config.Callback, value); end;
 
 				Config.Default = value;
 			else
@@ -5842,7 +6221,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			TextBox_2.Text = tostring(Config.Default);
 
-			Config.Callback(Value);
+			if Config.Callback then Config.Callback(Value); end;
 		end;
 
 		Args.Signal = Signal:Connect(function(bool)
@@ -6090,7 +6469,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			ValueText.Text = DaTabarser(Config.Default);
 
-			Config.Callback(Config.Default);
+			if Config.Callback then Config.Callback(Config.Default); end;
 		end);
 
 		repi.EventOut:Connect(function(v)
@@ -6119,7 +6498,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			repi:SetData(Config.Default,Config.Values,Config.Multi,true);
 
-			Config.Callback(Value);
+			if Config.Callback then Config.Callback(Value); end;
 		end;
 
 		function Args:SetText(str : string)
@@ -6206,6 +6585,10 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			Compkiller.Flags[Config.Flag] = Args;
 		end;
 
+		-- Forward the underlying popup's frame so callers (e.g. _KeybindHandler)
+		-- can exclude clicks on it from their own outside-click-closes-panel logic.
+		Args.DropdownRoot = repi.Root;
+
 		return Args;
 	end;
 
@@ -6233,6 +6616,21 @@ function Compkiller:SetTheme(name)
 			HighStrokeColor = Color3.new(0, 0.241379, 0.186445),
 		};
 	elseif name == "Default" then
+		Compkiller.Colors = {
+			Highlight       = Color3.fromRGB(168, 85, 247),
+			Toggle          = Color3.fromRGB(138, 63, 210),
+			Risky           = Color3.fromRGB(255, 196, 48),
+			BGDBColor       = Color3.fromRGB(8, 6, 12),
+			BlockColor      = Color3.fromRGB(16, 12, 22),
+			StrokeColor     = Color3.fromRGB(45, 32, 62),
+			SwitchColor     = Color3.fromRGB(222, 210, 235),
+			DropColor       = Color3.fromRGB(12, 9, 18),
+			MouseEnter      = Color3.fromRGB(58, 40, 82),
+			BlockBackground = Color3.fromRGB(24, 17, 34),
+			LineColor       = Color3.fromRGB(40, 28, 58),
+			HighStrokeColor = Color3.fromRGB(58, 40, 84),
+		};
+	elseif name == "Classic Blue" then
 		Compkiller.Colors = {
 			Highlight       = Color3.fromRGB(88, 182, 255),
 			Toggle          = Color3.fromRGB(60, 150, 230),
@@ -6427,8 +6825,17 @@ function Compkiller.new(Config : Window)
 		AlwayShowTab = false,
 		THREADS = {},
 		PerformanceMode = false,
-		Notify = Compkiller.newNotify()
+		Notify = Compkiller.newNotify(),
+		SearchIndex = {}
 	};
+
+	-- Global fuzzy search (Ctrl+K) index. DrawTab registers a Tab entry for
+	-- itself; DrawSection wraps its returned Add* methods so every element
+	-- created under it registers itself with a jump-to-section GoTo. See the
+	-- search overlay built near the end of this function.
+	function WindowArgs:_RegisterSearch(entry)
+		table.insert(WindowArgs.SearchIndex, entry);
+	end;
 
 	WindowArgs.Username = LocalPlayer.Name;
 
@@ -8869,12 +9276,32 @@ function Compkiller.new(Config : Window)
 			local _autoLoadName = nil;
 			local _activeName = nil;    -- most recently loaded config this session
 			local _filterText = "";     -- search filter
-			local AutoLoadPath = Compkiller:_Path(Configuration.Config.Directory, "__autoload");
+
+			-- Auto-load is keyed per Roblox account (UserId), not shared across
+			-- the whole machine. Without this, whichever config was last set to
+			-- auto-load would load for every account that signs into this same
+			-- executor workspace, forcing the user to re-toggle it every time
+			-- they switched accounts.
+			local AutoLoadPath = Compkiller:_Path(Configuration.Config.Directory, "__autoload_" .. tostring(LocalPlayer.UserId));
 
 			if isfile(AutoLoadPath) then
 				local ok, raw = pcall(readfile, AutoLoadPath);
 				if ok and raw and raw:byte() then
 					_autoLoadName = raw;
+				end;
+			else
+				-- One-time migration: adopt the old machine-wide auto-load
+				-- pointer (if any) for whichever account boots up first after
+				-- this update, then remove it so it can't leak into other
+				-- accounts' auto-load state.
+				local LegacyAutoLoadPath = Compkiller:_Path(Configuration.Config.Directory, "__autoload");
+				if isfile(LegacyAutoLoadPath) then
+					local ok, raw = pcall(readfile, LegacyAutoLoadPath);
+					if ok and raw and raw:byte() then
+						_autoLoadName = raw;
+						pcall(writefile, AutoLoadPath, raw);
+					end;
+					pcall(delfile, LegacyAutoLoadPath);
 				end;
 			end;
 
@@ -8886,8 +9313,8 @@ function Compkiller.new(Config : Window)
 				s = s:gsub("^%s+", ""):gsub("%s+$", "");
 				-- strip path separators and other bad chars
 				s = s:gsub("[/\\\"\'%c]", "");
-				-- never allow reserved name
-				if s == "__autoload" then s = ""; end;
+				-- never allow reserved name (incl. the per-account auto-load pointer files)
+				if s == "__autoload" or s:sub(1, 10) == "__autoload" then s = ""; end;
 				return s;
 			end;
 
@@ -9224,9 +9651,9 @@ function Compkiller.new(Config : Window)
 					local cfgInfo = v.Info or {};
 					local cfgName = v.Name;
 
-					-- Hide the internal autoload marker file, and apply search filter
+					-- Hide the internal autoload marker file(s), and apply search filter
 					local _skip = false;
-					if cfgName == "__autoload" then _skip = true; end;
+					if cfgName:sub(1, 10) == "__autoload" then _skip = true; end;
 					if (not _skip) and _filterText ~= "" and not string.find(string.lower(cfgName), _filterText, 1, true) then
 						_skip = true;
 					end;
@@ -9549,7 +9976,7 @@ function Compkiller.new(Config : Window)
 			Name    = "Theme",
 			Flag    = "UITheme",
 			Default = "Default",
-			Values  = { "Default", "Dark Blue", "Dark Green", "Purple Rose", "Skeet", "Crimson Dark", "Custom" },
+			Values  = { "Default", "Classic Blue", "Dark Blue", "Dark Green", "Purple Rose", "Skeet", "Crimson Dark", "Custom" },
 			Callback = function(v)
 				pcall(function() Compkiller:SetTheme(v) end);
 			end,
@@ -9612,7 +10039,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Accent",
 			Flag     = "UIColorAccent",
-			Default  = Color3.fromRGB(88, 182, 255),
+			Default  = Compkiller.Colors.Highlight,
 			Callback = function(color)
 				switchToCustom();
 				pcall(function() Compkiller:ChangeHighlightColor(color) end);
@@ -9622,7 +10049,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Background",
 			Flag     = "UIColorBackground",
-			Default  = Color3.fromRGB(10, 12, 18),
+			Default  = Compkiller.Colors.BGDBColor,
 			Callback = function(color)
 				switchToCustom();
 				applyColor("BGDBColor", color);
@@ -9632,7 +10059,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Block BG",
 			Flag     = "UIColorBlockBG",
-			Default  = Color3.fromRGB(22, 27, 42),
+			Default  = Compkiller.Colors.BlockBackground,
 			Callback = function(color)
 				switchToCustom();
 				applyColor("BlockBackground", color);
@@ -9642,7 +10069,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Block",
 			Flag     = "UIColorBlock",
-			Default  = Color3.fromRGB(18, 21, 32),
+			Default  = Compkiller.Colors.BlockColor,
 			Callback = function(color)
 				switchToCustom();
 				applyColor("BlockColor", color);
@@ -9652,7 +10079,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Dropdown",
 			Flag     = "UIColorDropdown",
-			Default  = Color3.fromRGB(15, 18, 28),
+			Default  = Compkiller.Colors.DropColor,
 			Callback = function(color)
 				switchToCustom();
 				applyColor("DropColor", color);
@@ -9662,7 +10089,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Border",
 			Flag     = "UIColorBorder",
-			Default  = Color3.fromRGB(42, 50, 74),
+			Default  = Compkiller.Colors.StrokeColor,
 			Callback = function(color)
 				switchToCustom();
 				applyColor("StrokeColor", color);
@@ -9672,7 +10099,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Highlight Border",
 			Flag     = "UIColorHighBorder",
-			Default  = Color3.fromRGB(52, 63, 92),
+			Default  = Compkiller.Colors.HighStrokeColor,
 			Callback = function(color)
 				switchToCustom();
 				applyColor("HighStrokeColor", color);
@@ -9682,7 +10109,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Separator",
 			Flag     = "UIColorSeparator",
-			Default  = Color3.fromRGB(38, 46, 68),
+			Default  = Compkiller.Colors.LineColor,
 			Callback = function(color)
 				switchToCustom();
 				applyColor("LineColor", color);
@@ -9692,7 +10119,7 @@ function Compkiller.new(Config : Window)
 		CustomColorsSection:AddColorPicker({
 			Name     = "Text",
 			Flag     = "UIColorText",
-			Default  = Color3.fromRGB(208, 218, 240),
+			Default  = Compkiller.Colors.SwitchColor,
 			Callback = function(color)
 				switchToCustom();
 				applyColor("SwitchColor", color);
@@ -9831,6 +10258,18 @@ function Compkiller.new(Config : Window)
 		-- will simply hide it when it loads.
 		ensureWatermark();
 
+		-- Hides the floating "Keybinds" indicator panel (_DrawKeybinds) that
+		-- lists any currently-active Hold/Toggle keybind bound via a toggle's
+		-- or slider's AutoKeybind panel.
+		ControlsSection:AddToggle({
+			Name     = "Hide Keybinds UI",
+			Flag     = "UIHideKeybindsUI",
+			Default  = false,
+			Callback = function(v)
+				Compkiller.HideKeybindsUI = v;
+			end,
+		});
+
 		ControlsSection:AddToggle({
 			Name     = "Rainbow Accent",
 			Flag     = "UIRainbowAccent",
@@ -9899,6 +10338,10 @@ function Compkiller.new(Config : Window)
 		local TabArgs = {};
 		local Upvalue = {};
 		local BASE_PADDING = 10;
+
+		-- Overwritten below with the real tab-switch logic; kept as a no-op
+		-- fallback so DrawSection can always call it safely.
+		TabArgs._SelectSelf = function() end;
 
 		if Internal then
 
@@ -10015,6 +10458,17 @@ function Compkiller.new(Config : Window)
 			end;
 
 			TabOpenSignal = Internal.Signal;
+
+			TabArgs._SelectSelf = function()
+				Internal.Signal:Fire(true);
+			end;
+
+			WindowArgs:_RegisterSearch({
+				Text = TabConfig.Name,
+				TabName = TabConfig.Name,
+				Kind = "Tab",
+				GoTo = TabArgs._SelectSelf
+			});
 
 			if not TabOpenSignal:GetValue() then
 				TabContent.Visible = false;
@@ -10251,6 +10705,19 @@ function Compkiller.new(Config : Window)
 			table.insert(WindowArgs.Tabs , {
 				Root = TabButton,
 				Remote = TabOpenSignal
+			});
+
+			TabArgs._SelectSelf = function()
+				for i,v in next, WindowArgs.Tabs do
+					v.Remote:Fire(v.Root == TabButton);
+				end;
+			end;
+
+			WindowArgs:_RegisterSearch({
+				Text = TabConfig.Name,
+				TabName = TabConfig.Name,
+				Kind = "Tab",
+				GoTo = TabArgs._SelectSelf
 			});
 
 			Compkiller:_Hover(TabButton,function()
@@ -10697,7 +11164,11 @@ function Compkiller.new(Config : Window)
 				})
 			end)
 
-			return Compkiller:_LoadElement(Section , true , TabOpenSignal)
+			local SectionArgs = Compkiller:_LoadElement(Section , true , TabOpenSignal);
+
+			Compkiller:_WrapSectionSearch(WindowArgs, SectionArgs, TabConfig.Name, config.Name, TabArgs._SelectSelf, Section);
+
+			return SectionArgs;
 		end;
 
 		return TabArgs;
@@ -11133,155 +11604,14 @@ function Compkiller.new(Config : Window)
 		pcall(function() CompKiller:Destroy() end);
 	end;
 
-	-- DrawSettings: populates the built-in UserSettings panel (opened via avatar click)
+	-- DrawSettings (avatar-panel "Preferences" popup) has been removed. It kept a
+	-- second, unguarded copy of the theme/color flags ("UI_Theme" / "UI_Color_*")
+	-- that raced with the real "UI Settings" tab's flags ("UITheme" / "UIColorAccent"
+	-- etc.) during config load — whichever applied last would stomp the other,
+	-- which is why the UI Settings tab could come back looking unloaded. The
+	-- dedicated "UI Settings" tab (DrawUISettings) is the only settings surface now.
 	function WindowArgs:DrawSettings()
-		-- Idempotent: if DrawSettings has already been called (either automatically
-		-- as part of Compkiller.new or manually by the user), return the previously
-		-- created ElementAPI so the caller can still add custom sections on top.
-		if WindowArgs._SettingsAPI then
-			return WindowArgs._SettingsAPI;
-		end;
-
-		if not WindowArgs.UserSettings.Create then
-			return;
-		end;
-
-		local ElementAPI = WindowArgs.UserSettings:Create();
-		WindowArgs._SettingsAPI = ElementAPI;
-
-		-- Section: Appearance --
-		local AppearanceSection = ElementAPI:DrawSection({
-			Name = "Appearance",
-			Position = "left",
-		});
-
-		-- Helper: apply a color to a Compkiller.Colors key and refresh all registered elements
-		local function ApplyColor(key, color)
-			Compkiller.Colors[key] = color;
-			if Compkiller.Elements[key] then
-				for _, v in next, Compkiller.Elements[key] do
-					if v.Element and v.Property then
-						v.Element[v.Property] = color;
-					end;
-				end;
-			end;
-		end;
-
-		-- Theme selector --
-		local ThemeNames = {"Default","Dark Blue","Dark Green","Purple Rose","Skeet","Crimson Dark","Custom"};
-
-		local ThemeDropdown = AppearanceSection:AddDropdown({
-			Name = "Theme",
-			Flag = "UI_Theme",
-			Default = "Default",
-			Values = ThemeNames,
-			Callback = function(value)
-				if value ~= "Custom" then
-					Compkiller:SetTheme(value);
-					-- Sync all color pickers to the newly loaded theme colors
-					if WindowArgs._SettingsColorPickers then
-						for colorKey, picker in next, WindowArgs._SettingsColorPickers do
-							picker:SetValue(Compkiller.Colors[colorKey]);
-						end;
-					end;
-				end;
-			end,
-		});
-
-		-- Color customization section --
-		local ColorSection = ElementAPI:DrawSection({
-			Name = "Custom Colors",
-			Position = "left",
-		});
-
-		-- Table of { display name, Colors key } pairs
-		local ColorDefs = {
-			{ "Accent",         "Highlight"       },
-			{ "Background",     "BGDBColor"       },
-			{ "Block BG",       "BlockBackground" },
-			{ "Block",          "BlockColor"      },
-			{ "Dropdown",       "DropColor"       },
-			{ "Border",         "StrokeColor"     },
-			{ "Highlight Border","HighStrokeColor" },
-			{ "Separator",      "LineColor"       },
-			{ "Text",           "SwitchColor"     },
-		};
-
-		WindowArgs._SettingsColorPickers = {};
-
-		for _, def in ipairs(ColorDefs) do
-			local label, key = def[1], def[2];
-
-			local picker = ColorSection:AddColorPicker({
-				Name = label,
-				Flag = "UI_Color_" .. key,
-				Default = Compkiller.Colors[key],
-				Callback = function(color)
-					if key == "Highlight" then
-						-- ChangeHighlightColor also updates Toggle color
-						Compkiller:ChangeHighlightColor(color);
-					else
-						ApplyColor(key, color);
-					end;
-					-- Switch theme label to Custom
-					ThemeDropdown:SetValue("Custom");
-				end,
-			});
-
-			WindowArgs._SettingsColorPickers[key] = picker;
-		end;
-
-		-- UI background opacity slider --
-		local BGOpacitySlider = AppearanceSection:AddSlider({
-			Name = "UI Opacity",
-			Min = 10,
-			Max = 100,
-			Default = 75,
-			Increment = 5,
-			Round = 0,
-			Type = "%",
-			Callback = function(value)
-				local transparency = 1 - (value / 100);
-				for _,v in next, Compkiller.Elements.BGDBColor do
-					if v.Element and v.Property == "BackgroundColor3" then
-						v.Element.BackgroundTransparency = transparency;
-					end;
-				end;
-			end,
-		});
-
-		-- Section: Controls --
-		local ControlSection = ElementAPI:DrawSection({
-			Name = "Controls",
-			Position = "left",
-		});
-
-		-- Menu toggle keybind --
-		ControlSection:AddKeybind({
-			Name = "Toggle Menu",
-			Default = Config.Keybind,
-			Callback = function(key)
-				WindowArgs:SetMenuKey(key);
-			end,
-		});
-
-		-- Section: Performance --
-		local PerfSection = ElementAPI:DrawSection({
-			Name = "Performance",
-			Position = "left",
-		});
-
-		-- Performance mode toggle --
-		PerfSection:AddToggle({
-			Name = "Performance Mode",
-			Default = false,
-			Callback = function(value)
-				Compkiller:OptimizeMode(value);
-				WindowArgs.PerformanceMode = value;
-			end,
-		});
-
-		return ElementAPI;
+		return WindowArgs._SettingsAPI;
 	end;
 
 	function WindowArgs:Update(config: WindowUpdate)
@@ -11425,11 +11755,256 @@ function Compkiller.new(Config : Window)
 		end);
 	end);
 
-	-- Built-in UI Settings: auto-populates the settings panel with Appearance,
-	-- Custom Colors, Controls, and Performance sections. Script authors can
-	-- still call Window:DrawSettings() manually to get the ElementAPI for adding
-	-- their own sections — the call is idempotent.
-	pcall(function() WindowArgs:DrawSettings(); end);
+	-- ══════════════════════════════════════════════════════════════════
+	--  Global fuzzy search (Ctrl+K) — jumps straight to any tab/section/
+	--  element by name instead of tab-hopping. Indexed by DrawTab and
+	--  DrawSection above (WindowArgs.SearchIndex / WindowArgs:_RegisterSearch).
+	-- ══════════════════════════════════════════════════════════════════
+	do
+		local SearchOverlay = Instance.new("Frame")
+		local SearchCorner = Instance.new("UICorner")
+		local SearchStroke = Instance.new("UIStroke")
+		local SearchBox = Instance.new("TextBox")
+		local SearchDivider = Instance.new("Frame")
+		local ResultsFrame = Instance.new("ScrollingFrame")
+		local ResultsLayout = Instance.new("UIListLayout")
+
+		SearchOverlay.Name = Compkiller:_RandomString();
+		SearchOverlay.Parent = CompKiller;
+		SearchOverlay.AnchorPoint = Vector2.new(0.5, 0);
+		SearchOverlay.BackgroundColor3 = Compkiller.Colors.BlockBackground;
+		SearchOverlay.BorderSizePixel = 0;
+		SearchOverlay.Position = UDim2.new(0.5, 0, 0.1, 0);
+		SearchOverlay.Size = UDim2.new(0, 420, 0, 46);
+		SearchOverlay.ClipsDescendants = true;
+		SearchOverlay.Visible = false;
+		SearchOverlay.ZIndex = 10000;
+		SearchOverlay.Active = true;
+
+		table.insert(Compkiller.Elements.BlockBackground, { Element = SearchOverlay, Property = "BackgroundColor3" });
+
+		Compkiller:_AddDragBlacklist(SearchOverlay);
+
+		SearchCorner.CornerRadius = UDim.new(0, 8);
+		SearchCorner.Parent = SearchOverlay;
+
+		SearchStroke.Color = Compkiller.Colors.HighStrokeColor;
+		SearchStroke.Parent = SearchOverlay;
+
+		table.insert(Compkiller.Elements.HighStrokeColor, { Element = SearchStroke, Property = "Color" });
+
+		SearchBox.Name = Compkiller:_RandomString();
+		SearchBox.Parent = SearchOverlay;
+		SearchBox.BackgroundTransparency = 1;
+		SearchBox.Position = UDim2.new(0, 14, 0, 0);
+		SearchBox.Size = UDim2.new(1, -28, 0, 44);
+		SearchBox.Font = Enum.Font.GothamMedium;
+		SearchBox.PlaceholderText = "Search tabs, sections, settings...";
+		SearchBox.Text = "";
+		SearchBox.ClearTextOnFocus = false;
+		SearchBox.TextColor3 = Compkiller.Colors.SwitchColor;
+		SearchBox.TextSize = 15;
+		SearchBox.TextXAlignment = Enum.TextXAlignment.Left;
+		SearchBox.ZIndex = 10001;
+
+		table.insert(Compkiller.Elements.SwitchColor, { Element = SearchBox, Property = "TextColor3" });
+
+		SearchDivider.Name = Compkiller:_RandomString();
+		SearchDivider.Parent = SearchOverlay;
+		SearchDivider.BackgroundColor3 = Compkiller.Colors.LineColor;
+		SearchDivider.BackgroundTransparency = 0.5;
+		SearchDivider.BorderSizePixel = 0;
+		SearchDivider.Position = UDim2.new(0, 10, 0, 45);
+		SearchDivider.Size = UDim2.new(1, -20, 0, 1);
+		SearchDivider.ZIndex = 10001;
+
+		table.insert(Compkiller.Elements.LineColor, { Element = SearchDivider, Property = "BackgroundColor3" });
+
+		ResultsFrame.Name = Compkiller:_RandomString();
+		ResultsFrame.Parent = SearchOverlay;
+		ResultsFrame.BackgroundTransparency = 1;
+		ResultsFrame.BorderSizePixel = 0;
+		ResultsFrame.Position = UDim2.new(0, 6, 0, 51);
+		ResultsFrame.Size = UDim2.new(1, -12, 0, 280);
+		ResultsFrame.CanvasSize = UDim2.new(0, 0, 0, 0);
+		ResultsFrame.ScrollBarThickness = 3;
+		ResultsFrame.BottomImage = "";
+		ResultsFrame.TopImage = "";
+		ResultsFrame.ZIndex = 10001;
+
+		ResultsLayout.Parent = ResultsFrame;
+		ResultsLayout.SortOrder = Enum.SortOrder.LayoutOrder;
+		ResultsLayout.Padding = UDim.new(0, 2);
+
+		ResultsLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
+			ResultsFrame.CanvasSize = UDim2.fromOffset(0, ResultsLayout.AbsoluteContentSize.Y);
+		end);
+
+		local MAX_RESULTS = 25;
+
+		-- Simple substring fuzzy match: starts-with ranks above contains,
+		-- everything else is excluded. Good enough for a settings hub — no
+		-- need for a full Levenshtein pass over a few hundred entries.
+		local function Score(Query, Text)
+			Query = string.lower(Query);
+			Text = string.lower(Text);
+
+			if Text == Query then return 3; end;
+			if string.sub(Text, 1, #Query) == Query then return 2; end;
+			if string.find(Text, Query, 1, true) then return 1; end;
+
+			return 0;
+		end;
+
+		local function ClearResults()
+			for _, Child in ipairs(ResultsFrame:GetChildren()) do
+				if Child:IsA("TextButton") then
+					Child:Destroy();
+				end;
+			end;
+		end;
+
+		local CloseSearch; -- forward-declared, defined below
+
+		local function RenderResults(Query)
+			ClearResults();
+
+			if Query == "" then
+				SearchOverlay.Size = UDim2.new(0, 420, 0, 46);
+				return;
+			end;
+
+			local Matches = {};
+
+			for _, Entry in ipairs(WindowArgs.SearchIndex) do
+				local S = Score(Query, Entry.Text);
+
+				if S > 0 then
+					table.insert(Matches, { Entry = Entry, Score = S });
+				end;
+			end;
+
+			table.sort(Matches, function(a, b)
+				if a.Score ~= b.Score then return a.Score > b.Score; end;
+				return a.Entry.Text < b.Entry.Text;
+			end);
+
+			local Shown = math.min(#Matches, MAX_RESULTS);
+
+			for i = 1, Shown do
+				local Entry = Matches[i].Entry;
+
+				local Row = Instance.new("TextButton");
+				Row.Name = Compkiller:_RandomString();
+				Row.Parent = ResultsFrame;
+				Row.BackgroundColor3 = Compkiller.Colors.DropColor;
+				Row.BackgroundTransparency = 0.3;
+				Row.BorderSizePixel = 0;
+				Row.AutoButtonColor = false;
+				Row.Size = UDim2.new(1, 0, 0, 34);
+				Row.Text = "";
+				Row.ZIndex = 10001;
+				Row.LayoutOrder = i;
+
+				local RowCorner = Instance.new("UICorner");
+				RowCorner.CornerRadius = UDim.new(0, 5);
+				RowCorner.Parent = Row;
+
+				local NameLabel = Instance.new("TextLabel");
+				NameLabel.Parent = Row;
+				NameLabel.BackgroundTransparency = 1;
+				NameLabel.AnchorPoint = Vector2.new(0, 0.5);
+				NameLabel.Position = UDim2.new(0, 10, 0.5, 0);
+				NameLabel.Size = UDim2.new(0.55, 0, 1, 0);
+				NameLabel.Font = Enum.Font.GothamMedium;
+				NameLabel.Text = Entry.Text;
+				NameLabel.TextColor3 = Compkiller.Colors.SwitchColor;
+				NameLabel.TextSize = 13;
+				NameLabel.TextXAlignment = Enum.TextXAlignment.Left;
+				NameLabel.TextTruncate = Enum.TextTruncate.AtEnd;
+				NameLabel.ZIndex = 10002;
+
+				local PathText = Entry.Kind == "Tab" and "Tab"
+					or (Entry.SectionName and (Entry.TabName .. " › " .. Entry.SectionName))
+					or Entry.TabName
+					or "";
+
+				local PathLabel = Instance.new("TextLabel");
+				PathLabel.Parent = Row;
+				PathLabel.BackgroundTransparency = 1;
+				PathLabel.AnchorPoint = Vector2.new(1, 0.5);
+				PathLabel.Position = UDim2.new(1, -10, 0.5, 0);
+				PathLabel.Size = UDim2.new(0.45, -10, 1, 0);
+				PathLabel.Font = Enum.Font.Gotham;
+				PathLabel.Text = PathText;
+				PathLabel.TextColor3 = Compkiller.Colors.SwitchColor;
+				PathLabel.TextTransparency = 0.5;
+				PathLabel.TextSize = 12;
+				PathLabel.TextXAlignment = Enum.TextXAlignment.Right;
+				PathLabel.TextTruncate = Enum.TextTruncate.AtEnd;
+				PathLabel.ZIndex = 10002;
+
+				Compkiller:_Hover(Row, function()
+					Compkiller:_Animation(Row, TweenInfo.new(0.15), { BackgroundTransparency = 0 });
+				end, function()
+					Compkiller:_Animation(Row, TweenInfo.new(0.15), { BackgroundTransparency = 0.3 });
+				end);
+
+				Row.MouseButton1Click:Connect(function()
+					if Entry.GoTo then
+						local ok = pcall(Entry.GoTo);
+						if not ok then warn("[Compkiller] search GoTo failed for", Entry.Text); end;
+					end;
+
+					if CloseSearch then CloseSearch(); end;
+				end);
+			end;
+
+			local ContentHeight = (Shown * 36);
+
+			SearchOverlay.Size = UDim2.new(0, 420, 0, 46 + 5 + math.clamp(ContentHeight, 0, 280));
+			ResultsFrame.Size = UDim2.new(1, -12, 0, math.clamp(ContentHeight, 0, 280));
+		end;
+
+		CloseSearch = function()
+			SearchOverlay.Visible = false;
+			SearchOverlay.Size = UDim2.new(0, 420, 0, 46);
+			SearchBox.Text = "";
+			ClearResults();
+			pcall(function() SearchBox:ReleaseFocus(false); end);
+		end;
+
+		local function OpenSearch()
+			SearchOverlay.Visible = true;
+			SearchBox.Text = "";
+			ClearResults();
+			SearchBox:CaptureFocus();
+		end;
+
+		SearchBox:GetPropertyChangedSignal('Text'):Connect(function()
+			RenderResults(SearchBox.Text);
+		end);
+
+		table.insert(Compkiller._OutsideClickWatchers, function()
+			if SearchOverlay.Visible and not Compkiller:_IsMouseOverFrame(SearchOverlay) then
+				CloseSearch();
+			end;
+		end);
+
+		UserInputService.InputBegan:Connect(function(Input, GameProcessed)
+			if Input.KeyCode == Enum.KeyCode.K and (UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)) then
+				if not WindowOpen:GetValue() then return; end;
+
+				if SearchOverlay.Visible then
+					CloseSearch();
+				else
+					OpenSearch();
+				end;
+			elseif Input.KeyCode == Enum.KeyCode.Escape and SearchOverlay.Visible then
+				CloseSearch();
+			end;
+		end);
+	end;
 
 	return WindowArgs;
 end;
@@ -11514,11 +12089,114 @@ function Compkiller:_Path(...)
 	return table.concat(args, "/");
 end;
 
+-- Uses an ALLOWLIST (keep only letters/digits/space/hyphen/underscore) rather
+-- than a blocklist, since game titles can contain emoji, unicode, or other
+-- characters that are perfectly valid in a Roblox title but illegal (or
+-- rejected by the executor's own path parser) in a real Windows folder name.
+function Compkiller:_SanitizeFolderName(name: string) : string?
+	name = name:gsub("[^%w%s%-]", "_");  -- anything not alnum/space/hyphen -> "_"
+	name = name:gsub("%s+", " ");         -- collapse whitespace runs
+	name = name:match("^%s*(.-)%s*$");    -- trim leading/trailing space
+	name = name:gsub("%.+$", "");         -- Windows disallows trailing dots
+	name = name:match("^%s*(.-)%s*$");    -- trim again in case a dot exposed trailing space
+
+	if name == "" then return nil; end;
+
+	-- Windows reserved device names can't be used as folder names either
+	local reserved = {
+		CON = true, PRN = true, AUX = true, NUL = true,
+		COM1 = true, COM2 = true, COM3 = true, COM4 = true, COM5 = true,
+		COM6 = true, COM7 = true, COM8 = true, COM9 = true,
+		LPT1 = true, LPT2 = true, LPT3 = true, LPT4 = true, LPT5 = true,
+		LPT6 = true, LPT7 = true, LPT8 = true, LPT9 = true,
+	};
+	if reserved[name:upper()] then
+		name = name .. "_Game";
+	end;
+
+	return name;
+end;
+
+function Compkiller:_LoadGameIndex(indexPath: string) : {[string]: string}
+	if not isfile(indexPath) then return {}; end;
+
+	local ok, decoded = pcall(function()
+		return HttpService:JSONDecode(readfile(indexPath));
+	end);
+
+	return (ok and type(decoded) == "table") and decoded or {};
+end;
+
+function Compkiller:_SaveGameIndex(indexPath: string, index: {[string]: string})
+	pcall(function()
+		writefile(indexPath, HttpService:JSONEncode(index));
+	end);
+end;
+
+function Compkiller:_MigrateFolder(oldPath: string, newPath: string)
+	pcall(function()
+		if not isfolder(newPath) then makefolder(newPath); end;
+		for _, filePath in ipairs(listfiles(oldPath)) do
+			local fileName = filePath:match("[^/\\]+$");
+			if fileName then
+				writefile(newPath .. "/" .. fileName, readfile(filePath));
+			end;
+		end;
+		delfolder(oldPath);
+	end);
+end;
+
+-- Resolve the current game's display name (e.g. "Baseplate") so every game
+-- automatically gets its own config folder, without the consumer having to
+-- hardcode/rename Config per script. Roblox lets a game's store title change
+-- at any time, but game.PlaceId never does, so a small index file under
+-- `directory` maps PlaceId -> "the folder name we used last time"; if the
+-- name has changed since last run, the old folder's files are migrated into
+-- the new name instead of being silently orphaned.
+function Compkiller:_ResolveGameFolder(directory: string) : string
+	local placeKey = tostring(game.PlaceId);
+	local fallback = "Game_" .. placeKey;
+
+	local ok, info = pcall(function()
+		return MarketplaceService:GetProductInfo(game.PlaceId);
+	end);
+	local rawName = ok and info and info.Name;
+	local currentName = (type(rawName) == "string" and rawName ~= "")
+		and Compkiller:_SanitizeFolderName(rawName) or nil;
+	currentName = currentName or fallback;
+
+	if not isfolder(directory) then makefolder(directory); end;
+
+	local indexPath = Compkiller:_Path(directory, "_GameFolderIndex.json");
+	local index = Compkiller:_LoadGameIndex(indexPath);
+	local previousName = index[placeKey];
+
+	if previousName and previousName ~= currentName then
+		local oldPath = Compkiller:_Path(directory, previousName);
+		local newPath = Compkiller:_Path(directory, currentName);
+		if isfolder(oldPath) and not isfolder(newPath) then
+			Compkiller:_MigrateFolder(oldPath, newPath);
+		end;
+	end;
+
+	index[placeKey] = currentName;
+	Compkiller:_SaveGameIndex(indexPath, index);
+
+	return currentName;
+end;
+
 function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunctions
 	ConfigManager = Compkiller.__CONFIG(ConfigManager , {
 		Directory = "Compkiller",
 		Config = "Software"
 	});
+
+	if ConfigManager.AutoGameFolder then
+		local ok, resolved = pcall(Compkiller._ResolveGameFolder, Compkiller, ConfigManager.Directory);
+		-- Last-resort fallback so anything unexpected (blocked HttpService,
+		-- corrupt index file, etc.) can never hard-crash the caller's script.
+		ConfigManager.Config = ok and resolved or ("Game_" .. tostring(game.PlaceId));
+	end;
 
 	-- Remember the base directory so per-user global settings that must
 	-- survive config switches (e.g. the menu toggle keybind) have a home.
@@ -11644,7 +12322,8 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 			local Name = string.sub(v , #Args.Directory + 2);
 
 			-- Skip internal marker files that are not real configs
-			if Name ~= "__autoload" and Name ~= "" then
+			-- (per-account auto-load pointers are named "__autoload_<UserId>")
+			if Name ~= "" and Name:sub(1, 10) ~= "__autoload" then
 				table.insert(names , Name);
 			end;
 		end;
@@ -11658,8 +12337,8 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 		for i,v in next , listfiles(Args.Directory) do
 			local Name = string.sub(v , #Args.Directory + 2);
 
-			-- Skip the autoload marker and any other non-config files
-			if Name ~= "__autoload" and Name ~= "" then
+			-- Skip the autoload marker(s) and any other non-config files
+			if Name ~= "" and Name:sub(1, 10) ~= "__autoload" then
 				local Info = Args:ReadInfo(Name);
 
 				-- ReadInfo returns false for unreadable / non-JSON files;
@@ -11696,7 +12375,7 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 		local count = 0;
 		for i,v in next , listfiles(Args.Directory) do
 			local Name = string.sub(v , #Args.Directory + 2);
-			if Name ~= "__autoload" and Name ~= "" then
+			if Name ~= "" and Name:sub(1, 10) ~= "__autoload" then
 				count = count + 1;
 			end;
 		end;
