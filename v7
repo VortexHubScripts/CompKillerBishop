@@ -4588,15 +4588,33 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 
 	local DrawButton = function()
 		local DropdownItem = Instance.new("Frame")
+		local UICorner = Instance.new("UICorner")
 		local BlockText = Instance.new("TextLabel")
 		local BlockLine = Instance.new("Frame")
 
 		DropdownItem.Name = Compkiller:_RandomString()
+		DropdownItem.BackgroundColor3 = Compkiller.Colors.MouseEnter
 		DropdownItem.BackgroundTransparency = 1.000
 		DropdownItem.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		DropdownItem.BorderSizePixel = 0
 		DropdownItem.Size = UDim2.new(1, -1, 0, 20)
 		DropdownItem.ZIndex = BaseZ_Index + 6
+
+		UICorner.CornerRadius = UDim.new(0, 3)
+		UICorner.Parent = DropdownItem
+
+		-- Rows had no hover feedback at all before — every other clickable
+		-- row in this library highlights on mouse-over, this just brings
+		-- dropdown items in line with that.
+		Compkiller:_Hover(DropdownItem, function()
+			Compkiller:_Animation(DropdownItem, TweenInfo.new(0.15), {
+				BackgroundTransparency = 0.85
+			});
+		end, function()
+			Compkiller:_Animation(DropdownItem, TweenInfo.new(0.15), {
+				BackgroundTransparency = 1
+			});
+		end);
 
 		BlockText.Name = Compkiller:_RandomString()
 		BlockText.Parent = DropdownItem
@@ -4747,6 +4765,11 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 					});
 
 					Callback(DataFrame.Value)
+
+					-- Single-select: close after picking, same as every other dropdown
+					-- UX convention. Multi-select intentionally stays open (see the
+					-- IsMulti branch above) since picking multiple values is the point.
+					ToggleUI(false);
 				end);
 			end;
 		end;
