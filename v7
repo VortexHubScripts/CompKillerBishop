@@ -4959,23 +4959,24 @@ function Compkiller:_RevealElement(ElementFrame: Frame, FallbackFrame: Frame)
 	end);
 end;
 
--- Small search-icon button pinned to the top-right of a tab's content area,
--- so search is discoverable without knowing the Ctrl+K shortcut. Called from
--- both branches of WindowArgs:DrawTab (normal tabs and DrawContainerTab
--- sub-tabs) right after TabContent is created, so every tab gets one.
+-- Single persistent search-icon button pinned to the window's own top-right
+-- corner, so search is discoverable without knowing the Ctrl+K shortcut.
+-- Parented once to MainFrame (not per-tab) so there's exactly one instance
+-- that stays put and stays visible regardless of which tab is active —
+-- called once from Compkiller.new right after TabMainFrame is set up.
 -- Wired to WindowArgs._OpenSearch, which the search overlay block near the
--- end of Compkiller.new sets — by the time any tab is actually drawn (after
--- Compkiller.new returns to the caller) that assignment has already run.
-function Compkiller:_AddTabSearchButton(TabContent: Frame, WindowArgs)
+-- end of Compkiller.new sets — by the time a user could ever click this
+-- (after Compkiller.new has returned) that assignment has already run.
+function Compkiller:_AddSearchButton(MainFrame: Frame, WindowArgs)
 	local SearchButton = Instance.new("ImageButton");
 
 	SearchButton.Name = Compkiller:_RandomString();
-	SearchButton.Parent = TabContent;
+	SearchButton.Parent = MainFrame;
 	SearchButton.AnchorPoint = Vector2.new(1, 0);
 	SearchButton.BackgroundTransparency = 1;
-	SearchButton.Position = UDim2.new(1, -2, 0, -2);
+	SearchButton.Position = UDim2.new(1, -16, 0, 12);
 	SearchButton.Size = UDim2.new(0, 18, 0, 18);
-	SearchButton.ZIndex = TabContent.ZIndex + 20;
+	SearchButton.ZIndex = MainFrame.ZIndex + 40;
 	SearchButton.Image = Compkiller:_GetIcon("search");
 	SearchButton.ImageColor3 = Compkiller.Colors.SwitchColor;
 	SearchButton.ImageTransparency = 0.5;
@@ -7277,6 +7278,12 @@ function Compkiller.new(Config : Window)
 	TabMainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
 	TabMainFrame.Size = UDim2.new(1, 0, 1, 0)
 	TabMainFrame.ZIndex = 5
+
+	-- One persistent search icon for the whole window (not per-tab) — see
+	-- Compkiller:_AddSearchButton. Wired to WindowArgs._OpenSearch, set later
+	-- in this same function when the search overlay itself is built; safe to
+	-- reference before that point since it's a table field, not an upvalue.
+	Compkiller:_AddSearchButton(MainFrame, WindowArgs);
 
 	if Compkiller:_IsMobile() then
 		Compkiller:_AddDragBlacklist(TabButtons);
@@ -10501,8 +10508,6 @@ function Compkiller.new(Config : Window)
 			TabContent.Size = UDim2.new(1, -5,1, -5)
 			TabContent.ZIndex = 6
 
-			Compkiller:_AddTabSearchButton(TabContent, WindowArgs);
-
 			Left.Name = Compkiller:_RandomString()
 			Left.Parent = TabContent
 			Left.Active = true
@@ -10715,8 +10720,6 @@ function Compkiller.new(Config : Window)
 			TabContent.Position = UDim2.new(0.5, 0, 0.5, 0)
 			TabContent.Size = UDim2.new(1, -15, 1, -15)
 			TabContent.ZIndex = 6
-
-			Compkiller:_AddTabSearchButton(TabContent, WindowArgs);
 
 			Left.Name = Compkiller:_RandomString()
 			Left.Parent = TabContent
