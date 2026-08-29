@@ -414,6 +414,7 @@ Compkiller.Elements = {
 	BlockBackground = {},
 	LineColor = {},
 	HighStrokeColor = {},
+	Toggle = {},
 };
 
 Compkiller.DragBlacklist = {};
@@ -1918,6 +1919,16 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 			Property = "BackgroundColor3"
 		})
 
+		-- Tracked separately from DropColor above: this is only consulted for
+		-- pills currently ON (via the Enabled attribute set below), so a theme
+		-- refresh repaints an ON pill with the distinct Colors.Toggle shade
+		-- instead of leaving it stuck on whatever color it had at switch time
+		-- (or, before this category existed, silently falling back to no-op).
+		table.insert(Compkiller.Elements.Toggle , {
+			Element = Toggle,
+			Property = "BackgroundColor3"
+		})
+
 		UICorner.CornerRadius = UDim.new(1, 0)
 		UICorner.Parent = Toggle
 
@@ -2725,7 +2736,7 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 	local HexFrame = Instance.new("Frame")
 	local UICorner_6 = Instance.new("UICorner")
 	local UIStroke_8 = Instance.new("UIStroke")
-	local TextLabel = Instance.new("TextLabel")
+	local TextLabel = Instance.new("TextBox")
 
 	ColorPickerWindow.Name = Compkiller:_RandomString()
 	ColorPickerWindow.Parent = Window
@@ -2940,6 +2951,7 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 	TextLabel.TextColor3 = Compkiller.Colors.SwitchColor
 	TextLabel.TextSize = 13.000
 	TextLabel.TextXAlignment = Enum.TextXAlignment.Left
+	TextLabel.ClearTextOnFocus = false
 
 	table.insert(Compkiller.Elements.SwitchColor , {
 		Element = TextLabel,
@@ -3224,6 +3236,35 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 
 		Callback(RealColor , Transparency);
 	end;
+
+	-- Hex editor: the hex readout was display-only before — type a code and
+	-- press Enter (or click away) to jump straight to that color instead of
+	-- dragging the RGB/box sliders into position.
+	TextLabel.Focused:Connect(function()
+		task.defer(function()
+			pcall(function()
+				TextLabel.CursorPosition = #TextLabel.Text + 1;
+				TextLabel.SelectionStart = 1;
+			end);
+		end);
+	end);
+
+	TextLabel.FocusLost:Connect(function()
+		local Hex = TextLabel.Text:gsub("^#", ""):gsub("%s", "");
+
+		if #Hex == 6 and Hex:match("^%x+$") then
+			local Ok, Color = pcall(Color3.fromHex, "#" .. Hex);
+
+			if Ok then
+				H, S, V = Color:ToHSV();
+			end;
+		end;
+
+		-- Always re-render from the (possibly unchanged) HSV state — this
+		-- both applies a valid edit and snaps back to the real current color
+		-- on invalid input, instead of leaving a bad string sitting in the box.
+		Args:Update();
+	end);
 
 	local SPAWN_THREAD;
 
@@ -6894,12 +6935,6 @@ function Compkiller:RefreshCurrentColor()
 		end;
 	end;
 
-	for i,v in next , Compkiller.Elements do
-		if v.Element and v.Property and v.Element:GetAttribute('Enabled') then
-			v.Element[v.Property] = Compkiller.Colors.Highlight;
-		end;
-	end;
-
 	for i,v in next , Compkiller.Elements.Risky do
 		if v.Element and v.Property then
 			v.Element[v.Property] = Compkiller.Colors.Risky;
@@ -6953,13 +6988,28 @@ function Compkiller:RefreshCurrentColor()
 			v.Element[v.Property] = Compkiller.Colors.HighStrokeColor;
 		end;
 	end;
+
+	-- Must run AFTER the DropColor loop above: every toggle pill (on or off)
+	-- is also tracked under DropColor for its idle/off shade, so an ON pill
+	-- needs Colors.Toggle applied second to actually win.
+	for i,v in next , Compkiller.Elements.Toggle do
+		if v.Element and v.Property and v.Element:GetAttribute('Enabled') then
+			v.Element[v.Property] = Compkiller.Colors.Toggle;
+		end;
+	end;
 end;
 
 function Compkiller:ChangeHighlightColor(NewColor: Color3)
 	local H,S,V = NewColor:ToHSV();
 
 	Compkiller.Colors.Highlight = NewColor;
-	Compkiller.Colors.Toggle = Color3.fromHSV(H,S,V - 0.2);
+
+	-- Only auto-derive Toggle from Accent if the user hasn't picked their own
+	-- Toggle color — otherwise every Accent tweak would silently overwrite a
+	-- deliberate custom choice (see the "Toggle" color picker in Custom Colors).
+	if not Compkiller.CustomToggleColor then
+		Compkiller.Colors.Toggle = Color3.fromHSV(H,S,V - 0.2);
+	end;
 
 	for i,v in next , Compkiller.Elements.Highlight do
 		if v.Element and v.Property then
@@ -6967,9 +7017,9 @@ function Compkiller:ChangeHighlightColor(NewColor: Color3)
 		end;
 	end;
 
-	for i,v in next , Compkiller.Elements do
+	for i,v in next , Compkiller.Elements.Toggle do
 		if v.Element and v.Property and v.Element:GetAttribute('Enabled') then
-			v.Element[v.Property] = NewColor;
+			v.Element[v.Property] = Compkiller.Colors.Toggle;
 		end;
 	end;
 end;
@@ -10303,6 +10353,39 @@ function Compkiller.new(Config : Window)
 			Callback = function(color)
 				switchToCustom();
 				applyColor("SwitchColor", color);
+			end,
+		});
+
+		CustomColorsSection:AddColorPicker({
+			Name     = "Risky",
+			Flag     = "UIColorRisky",
+			Default  = Compkiller.Colors.Risky,
+			Callback = function(color)
+				switchToCustom();
+				applyColor("Risky", color);
+			end,
+		});
+
+		-- Toggle's ON-state pill color normally auto-derives from Accent (a
+		-- slightly darker shade) — picking one here overrides that so future
+		-- Accent changes stop silently overwriting it. Elements.Toggle only
+		-- ever repaints entries whose Enabled attribute is currently true, so
+		-- this can't reuse the generic applyColor helper (which applies
+		-- unconditionally) without also recoloring OFF pills.
+		CustomColorsSection:AddColorPicker({
+			Name     = "Toggle (On State)",
+			Flag     = "UIColorToggle",
+			Default  = Compkiller.Colors.Toggle,
+			Callback = function(color)
+				switchToCustom();
+				Compkiller.CustomToggleColor = true;
+				Compkiller.Colors.Toggle = color;
+
+				for _, v in next, Compkiller.Elements.Toggle do
+					if v.Element and v.Property and v.Element:GetAttribute('Enabled') then
+						pcall(function() v.Element[v.Property] = color end);
+					end;
+				end;
 			end,
 		});
 
