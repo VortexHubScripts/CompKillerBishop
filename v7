@@ -381,6 +381,7 @@ local Compkiller = {
 	},
 	PerformanceMode = false,
 	HideKeybindsUI = false,
+	CurrentFontName = "Gotham",
 	WindowsNil = {},
 	NilFolder = Instance.new('Folder'),
 	ArcylicParent = CurrentCamera,
@@ -415,6 +416,7 @@ Compkiller.Elements = {
 	LineColor = {},
 	HighStrokeColor = {},
 	Toggle = {},
+	Font = {},
 };
 
 Compkiller.DragBlacklist = {};
@@ -2335,6 +2337,11 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 		BlockText.TextTransparency = 0.300
 		BlockText.TextXAlignment = Enum.TextXAlignment.Left
 
+		table.insert(Compkiller.Elements.Font,{
+			Element = BlockText,
+			Property = "Font"
+		})
+
 		table.insert(Compkiller.Elements.SwitchColor,{
 			Element = BlockText,
 			Property = "TextColor3"
@@ -2464,6 +2471,11 @@ function Compkiller:_CreateBlock(Signal)
 	BlockText.TextSize = 14.000
 	BlockText.TextTransparency = 0.300
 	BlockText.TextXAlignment = Enum.TextXAlignment.Left
+
+	table.insert(Compkiller.Elements.Font , {
+		Element = BlockText,
+		Property = 'Font'
+	});
 
 	table.insert(Compkiller.Elements.SwitchColor , {
 		Element = BlockText,
@@ -3208,7 +3220,7 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		Transparency = TransparencyValue;
 	end;
 
-	function Args:Update()
+	function Args:Update(Silent: boolean?)
 		local MainColor = Color3.fromHSV(H , S , 1);
 		local RealColor = Color3.fromHSV(H , S , V);
 
@@ -3234,7 +3246,7 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 
 		TextLabel.Text = "#" .. tostring(RealColor:ToHex())
 
-		Callback(RealColor , Transparency);
+		Callback(RealColor , Transparency , Silent);
 	end;
 
 	-- Hex editor: the hex readout was display-only before — type a code and
@@ -4673,6 +4685,11 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 		BlockText.TextTransparency = 0.500
 		BlockText.TextXAlignment = Enum.TextXAlignment.Left
 
+		table.insert(Compkiller.Elements.Font , {
+			Element = BlockText,
+			Property = 'Font'
+		});
+
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = BlockText,
 			Property = 'TextColor3'
@@ -5320,14 +5337,14 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		local Button = Compkiller:_Input(ColorPicker);
 
-		local ColorPicker = Compkiller:_AddColorPickerPanel(Button,function(color,opc)
+		local ColorPicker = Compkiller:_AddColorPickerPanel(Button,function(color,opc,silent)
 			Config.Default = color;
 			Config.Transparency = opc;
 
 			ColorFrame.BackgroundColor3 = color;
 			ColorFrame.BackgroundTransparency = opc;
 
-			if Config.Callback then Config.Callback(Config.Default , Config.Transparency); end;
+			if not silent and Config.Callback then Config.Callback(Config.Default , Config.Transparency); end;
 		end);
 
 		ColorPicker:SetColor(Config.Default,Config.Transparency);
@@ -5337,14 +5354,17 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		Args.Flag = Config.Flag;
 
-		function Args:SetValue(value,opc)
+		-- Silent (3rd arg): update the displayed swatch/hex without firing
+		-- Config.Callback — used by the UI Settings theme dropdown to refresh
+		-- Custom Colors swatches after switching a preset without that refresh
+		-- itself being mistaken for a user edit (which would flip Theme back
+		-- to "Custom").
+		function Args:SetValue(value, opc, Silent)
 			Config.Default = value;
 			Config.Transparency = opc;
 
 			ColorPicker:SetColor(value,opc);
-			ColorPicker:Update();
-
-			if Config.Callback then Config.Callback(value,opc); end;
+			ColorPicker:Update(Silent);
 		end;
 
 		function Args:SetText(str : string)
@@ -5459,6 +5479,11 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		TextLabel.TextColor3 = Compkiller.Colors.SwitchColor
 		TextLabel.TextSize = 12.000
 		TextLabel.TextStrokeTransparency = 0.900
+
+		table.insert(Compkiller.Elements.Font , {
+			Element = TextLabel,
+			Property = 'Font'
+		});
 
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = TextLabel,
@@ -5616,6 +5641,11 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		BlockText.TextTransparency = 0.100
 		BlockText.TextXAlignment = Enum.TextXAlignment.Left
 
+		table.insert(Compkiller.Elements.Font , {
+			Element = BlockText,
+			Property = 'Font'
+		});
+
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = BlockText,
 			Property = 'TextColor3'
@@ -5720,6 +5750,11 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		ValueText.TextXAlignment = Enum.TextXAlignment.Right
 		ValueText.ClearTextOnFocus = false
 		ValueText.MultiLine = false
+
+		table.insert(Compkiller.Elements.Font , {
+			Element = ValueText,
+			Property = 'Font'
+		});
 
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = ValueText,
@@ -5999,6 +6034,11 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		BlockText.TextXAlignment = Enum.TextXAlignment.Left
 		BlockText.RichText = true
 
+		table.insert(Compkiller.Elements.Font , {
+			Element = BlockText,
+			Property = 'Font'
+		});
+
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = BlockText,
 			Property = 'TextColor3'
@@ -6037,6 +6077,11 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		DescriptionText.TextXAlignment = Enum.TextXAlignment.Left
 		DescriptionText.TextYAlignment = Enum.TextYAlignment.Top
 		DescriptionText.TextWrapped = true
+
+		table.insert(Compkiller.Elements.Font , {
+			Element = DescriptionText,
+			Property = 'Font'
+		});
 
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = DescriptionText,
@@ -6273,6 +6318,11 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		BlockText.TextSize = 14.000
 		BlockText.TextTransparency = 0.300
 		BlockText.TextXAlignment = Enum.TextXAlignment.Left
+
+		table.insert(Compkiller.Elements.Font,{
+			Element = BlockText,
+			Property = "Font"
+		})
 
 		table.insert(Compkiller.Elements.SwitchColor,{
 			Element = BlockText,
@@ -7022,6 +7072,30 @@ function Compkiller:ChangeHighlightColor(NewColor: Color3)
 			v.Element[v.Property] = Compkiller.Colors.Toggle;
 		end;
 	end;
+end;
+
+-- Swaps the UI's font family. Only covers text registered into
+-- Compkiller.Elements.Font (section headers, element labels, buttons,
+-- dropdowns, text boxes, paragraphs, notifications, the window title) —
+-- the file has far too many one-off TextLabels to retrofit every single one,
+-- so this is the high-visibility subset rather than a literal 100% sweep.
+-- Looks for a Medium weight first (matching this library's usual default
+-- weight for body text) and falls back to the family's base weight if that
+-- specific enum member doesn't exist.
+function Compkiller:SetFont(FamilyName: string)
+	local FontEnum = Enum.Font[FamilyName .. "Medium"] or Enum.Font[FamilyName];
+
+	if not FontEnum then return false; end;
+
+	Compkiller.CurrentFontName = FamilyName;
+
+	for i,v in next, Compkiller.Elements.Font do
+		if v.Element and v.Property then
+			pcall(function() v.Element[v.Property] = FontEnum end);
+		end;
+	end;
+
+	return true;
 end;
 
 function Compkiller.new(Config : Window)
@@ -8528,6 +8602,11 @@ function Compkiller.new(Config : Window)
 		SectionText.TextTransparency = 0.500
 		SectionText.TextXAlignment = Enum.TextXAlignment.Left
 
+		table.insert(Compkiller.Elements.Font , {
+			Element = SectionText,
+			Property = 'Font'
+		});
+
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = SectionText,
 			Property = 'TextColor3'
@@ -8750,6 +8829,11 @@ function Compkiller.new(Config : Window)
 		TextLabel.TextColor3 = Compkiller.Colors.SwitchColor
 		TextLabel.TextSize = 12.000
 		TextLabel.TextStrokeTransparency = 0.900
+
+		table.insert(Compkiller.Elements.Font , {
+			Element = TextLabel,
+			Property = 'Font'
+		});
 
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = TextLabel,
@@ -9048,7 +9132,7 @@ function Compkiller.new(Config : Window)
 			ConfigBlock.BorderColor3 = Color3.fromRGB(0, 0, 0)
 			ConfigBlock.BorderSizePixel = 0
 			ConfigBlock.BackgroundTransparency = 1
-			ConfigBlock.Size = UDim2.new(1, -1, 0, 48)
+			ConfigBlock.Size = UDim2.new(1, -1, 0, 56)
 			ConfigBlock.ZIndex = 10
 
 			if Compkiller:_IsMobile() then
@@ -9089,7 +9173,7 @@ function Compkiller.new(Config : Window)
 			ConfigText.AnchorPoint = Vector2.new(0, 0)
 			ConfigText.BackgroundTransparency = 1
 			ConfigText.BorderSizePixel = 0
-			ConfigText.Position = UDim2.new(0, 12, 0, 5)
+			ConfigText.Position = UDim2.new(0, 12, 0, 8)
 			ConfigText.Size = UDim2.new(0.55, 0, 0, 16)
 			ConfigText.ZIndex = 11
 			ConfigText.Font = Enum.Font.GothamMedium
@@ -9116,7 +9200,7 @@ function Compkiller.new(Config : Window)
 			RenameBox.BackgroundColor3 = Compkiller.Colors.BlockColor
 			RenameBox.BackgroundTransparency = 0.3
 			RenameBox.BorderSizePixel = 0
-			RenameBox.Position = UDim2.new(0, 10, 0, 3)
+			RenameBox.Position = UDim2.new(0, 10, 0, 6)
 			RenameBox.Size = UDim2.new(0.55, 0, 0, 20)
 			RenameBox.ZIndex = 15
 			RenameBox.Visible = false
@@ -9153,7 +9237,7 @@ function Compkiller.new(Config : Window)
 			BadgeRow.AnchorPoint = Vector2.new(1, 0)
 			BadgeRow.BackgroundTransparency = 1
 			BadgeRow.BorderSizePixel = 0
-			BadgeRow.Position = UDim2.new(1, -10, 0, 5)
+			BadgeRow.Position = UDim2.new(1, -10, 0, 8)
 			BadgeRow.Size = UDim2.new(0, 120, 0, 13)
 			BadgeRow.ZIndex = 12
 
@@ -9165,37 +9249,43 @@ function Compkiller.new(Config : Window)
 			BadgeLayout.SortOrder = Enum.SortOrder.LayoutOrder
 			BadgeLayout.Padding = UDim.new(0, 6)
 
-			local ActiveTag = Instance.new("TextLabel")
-			ActiveTag.Name = Compkiller:_RandomString()
-			ActiveTag.Parent = BadgeRow
-			ActiveTag.LayoutOrder = 1
-			ActiveTag.BackgroundTransparency = 1
-			ActiveTag.BorderSizePixel = 0
-			ActiveTag.Size = UDim2.new(0, 48, 0, 13)
-			ActiveTag.ZIndex = 12
-			ActiveTag.Font = Enum.Font.GothamBold
-			ActiveTag.Text = "● ACTIVE"
-			ActiveTag.TextColor3 = Color3.fromRGB(120, 220, 140)
-			ActiveTag.TextSize = 10
-			ActiveTag.TextTransparency = 1
-			ActiveTag.TextXAlignment = Enum.TextXAlignment.Right
-			ActiveTag.Visible = false
+			-- Pill-shaped chips (tinted background + bold colored text) instead of
+			-- plain colored text — a lot easier to spot at a glance in a long list.
+			local function _MakeBadge(order, text, color, width)
+				local pill = Instance.new("Frame")
+				pill.Name = Compkiller:_RandomString()
+				pill.Parent = BadgeRow
+				pill.LayoutOrder = order
+				pill.BackgroundColor3 = color
+				pill.BackgroundTransparency = 1
+				pill.BorderSizePixel = 0
+				pill.Size = UDim2.new(0, width, 0, 16)
+				pill.ZIndex = 12
+				pill.Visible = false
 
-			local AutoTag = Instance.new("TextLabel")
-			AutoTag.Name = Compkiller:_RandomString()
-			AutoTag.Parent = BadgeRow
-			AutoTag.LayoutOrder = 2
-			AutoTag.BackgroundTransparency = 1
-			AutoTag.BorderSizePixel = 0
-			AutoTag.Size = UDim2.new(0, 40, 0, 13)
-			AutoTag.ZIndex = 12
-			AutoTag.Font = Enum.Font.GothamBold
-			AutoTag.Text = "● AUTO"
-			AutoTag.TextColor3 = Color3.fromRGB(90, 180, 255)
-			AutoTag.TextSize = 10
-			AutoTag.TextTransparency = 1
-			AutoTag.TextXAlignment = Enum.TextXAlignment.Right
-			AutoTag.Visible = false
+				local pillCorner = Instance.new("UICorner")
+				pillCorner.CornerRadius = UDim.new(1, 0)
+				pillCorner.Parent = pill
+
+				local txt = Instance.new("TextLabel")
+				txt.Name = Compkiller:_RandomString()
+				txt.Parent = pill
+				txt.AnchorPoint = Vector2.new(0.5, 0.5)
+				txt.Position = UDim2.new(0.5, 0, 0.5, 0)
+				txt.Size = UDim2.new(1, -4, 1, 0)
+				txt.BackgroundTransparency = 1
+				txt.Font = Enum.Font.GothamBold
+				txt.Text = text
+				txt.TextColor3 = color
+				txt.TextSize = 10
+				txt.TextTransparency = 1
+				txt.ZIndex = 13
+
+				return pill, txt;
+			end;
+
+			local ActiveTag, ActiveTagText = _MakeBadge(1, "ACTIVE", Color3.fromRGB(120, 220, 140), 54);
+			local AutoTag, AutoTagText = _MakeBadge(2, "AUTO", Color3.fromRGB(90, 180, 255), 44);
 
 			-- ======== Middle-right: Delete | Save | Load ========
 			local TopButtons = Instance.new("Frame")
@@ -9204,7 +9294,7 @@ function Compkiller.new(Config : Window)
 			TopButtons.AnchorPoint = Vector2.new(1, 0)
 			TopButtons.BackgroundTransparency = 1
 			TopButtons.BorderSizePixel = 0
-			TopButtons.Position = UDim2.new(1, -10, 0, 24)
+			TopButtons.Position = UDim2.new(1, -10, 0, 31)
 			TopButtons.Size = UDim2.new(0, 180, 0, 20)
 			TopButtons.ZIndex = 12
 
@@ -9295,7 +9385,7 @@ function Compkiller.new(Config : Window)
 			BottomIcons.AnchorPoint = Vector2.new(0, 0)
 			BottomIcons.BackgroundTransparency = 1
 			BottomIcons.BorderSizePixel = 0
-			BottomIcons.Position = UDim2.new(0, 12, 0, 24)
+			BottomIcons.Position = UDim2.new(0, 12, 0, 31)
 			BottomIcons.Size = UDim2.new(0, 100, 0, 20)
 			BottomIcons.ZIndex = 12
 
@@ -9375,8 +9465,10 @@ function Compkiller.new(Config : Window)
 
 				AutoTag.Visible = _isAutoLoad;
 				ActiveTag.Visible = _isActive;
-				AutoTag.TextTransparency = _isAutoLoad and 0 or 1;
-				ActiveTag.TextTransparency = _isActive and 0 or 1;
+				AutoTag.BackgroundTransparency = _isAutoLoad and 0.85 or 1;
+				ActiveTag.BackgroundTransparency = _isActive and 0.85 or 1;
+				AutoTagText.TextTransparency = _isAutoLoad and 0 or 1;
+				ActiveTagText.TextTransparency = _isActive and 0 or 1;
 
 				-- Accent strip: active (green) takes priority over auto-load (blue)
 				AccentBar.Visible = _isActive or _isAutoLoad;
@@ -9403,10 +9495,12 @@ function Compkiller.new(Config : Window)
 
 					-- Badges fade in only if enabled (Visible is gated separately)
 					if _isActive then
-						Compkiller:_Animation(ActiveTag, Tween, { TextTransparency = 0 });
+						Compkiller:_Animation(ActiveTag, Tween, { BackgroundTransparency = 0.85 });
+						Compkiller:_Animation(ActiveTagText, Tween, { TextTransparency = 0 });
 					end;
 					if _isAutoLoad then
-						Compkiller:_Animation(AutoTag, Tween, { TextTransparency = 0 });
+						Compkiller:_Animation(AutoTag, Tween, { BackgroundTransparency = 0.85 });
+						Compkiller:_Animation(AutoTagText, Tween, { TextTransparency = 0 });
 					end;
 					if AccentBar.Visible then
 						Compkiller:_Animation(AccentBar, Tween, { BackgroundTransparency = 0 });
@@ -9432,8 +9526,10 @@ function Compkiller.new(Config : Window)
 					Compkiller:_Animation(ConfigBlock, Tween, { BackgroundTransparency = 1 });
 					Compkiller:_Animation(BlockStroke, Tween, { Transparency = 1 });
 					Compkiller:_Animation(ConfigText, Tween, { TextTransparency = 1 });
-					Compkiller:_Animation(ActiveTag, Tween, { TextTransparency = 1 });
-					Compkiller:_Animation(AutoTag, Tween, { TextTransparency = 1 });
+					Compkiller:_Animation(ActiveTag, Tween, { BackgroundTransparency = 1 });
+					Compkiller:_Animation(AutoTag, Tween, { BackgroundTransparency = 1 });
+					Compkiller:_Animation(ActiveTagText, Tween, { TextTransparency = 1 });
+					Compkiller:_Animation(AutoTagText, Tween, { TextTransparency = 1 });
 					Compkiller:_Animation(AccentBar, Tween, { BackgroundTransparency = 1 });
 
 					Compkiller:_Animation(DelButton, Tween, { ImageTransparency = 1 });
@@ -10184,6 +10280,13 @@ function Compkiller.new(Config : Window)
 		local _uiReady        = false; -- gates switchToCustom() until Init() fires
 		local _configInitDone = false; -- gates SetValue("Custom") until 3s post-load
 
+		-- Forward-declared: assigned once the Custom Colors pickers exist further
+		-- down, but the Theme dropdown (defined first) needs to call it on every
+		-- selection — a plain local capturing an upvalue resolves at call time,
+		-- so this is safe as long as it's assigned before the dropdown is ever
+		-- actually clicked (it is, both happen synchronously in this same function).
+		local _refreshCustomColorSwatches = function() end;
+
 		-- Rainbow accent state
 		local _rainbowThread = nil;
 		local _rainbowHue    = 0;
@@ -10209,9 +10312,25 @@ function Compkiller.new(Config : Window)
 			Values  = { "Default", "Classic Blue", "Dark Blue", "Dark Green", "Purple Rose", "Skeet", "Crimson Dark", "Custom" },
 			Callback = function(v)
 				pcall(function() Compkiller:SetTheme(v) end);
+				pcall(_refreshCustomColorSwatches);
 			end,
 		});
 		_themeDropdown = themeDropdown;
+
+		-- Font family. Covers section headers, element labels (toggles,
+		-- keybinds, color pickers, sliders, buttons, dropdowns), and paragraph
+		-- text — the highest-visibility text in the UI, not a literal 100%
+		-- sweep of every one-off label in the file (notification toasts and
+		-- the window title keep their current font for now).
+		AppearanceSection:AddDropdown({
+			Name    = "Font",
+			Flag    = "UIFont",
+			Default = Compkiller.CurrentFontName or "Gotham",
+			Values  = { "Gotham", "SourceSans", "Roboto", "Montserrat", "Merriweather" },
+			Callback = function(v)
+				pcall(function() Compkiller:SetFont(v) end);
+			end,
+		});
 
 		-- Called by every color picker callback; switches theme label to Custom.
 		-- Suppressed while a config load is applying flags — the pickers firing
@@ -10266,7 +10385,13 @@ function Compkiller.new(Config : Window)
 			Position = "left",
 		});
 
-		CustomColorsSection:AddColorPicker({
+		-- Picker -> the Compkiller.Colors key it edits, so the Theme dropdown
+		-- can refresh every swatch to match a newly-picked preset (see
+		-- _refreshCustomColorSwatches below). Populated as each picker below
+		-- is created.
+		local _customColorPickers = {};
+
+		local AccentPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Accent",
 			Flag     = "UIColorAccent",
 			Default  = Compkiller.Colors.Highlight,
@@ -10275,8 +10400,9 @@ function Compkiller.new(Config : Window)
 				pcall(function() Compkiller:ChangeHighlightColor(color) end);
 			end,
 		});
+		_customColorPickers[AccentPicker] = "Highlight";
 
-		CustomColorsSection:AddColorPicker({
+		local BackgroundPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Background",
 			Flag     = "UIColorBackground",
 			Default  = Compkiller.Colors.BGDBColor,
@@ -10285,8 +10411,9 @@ function Compkiller.new(Config : Window)
 				applyColor("BGDBColor", color);
 			end,
 		});
+		_customColorPickers[BackgroundPicker] = "BGDBColor";
 
-		CustomColorsSection:AddColorPicker({
+		local BlockBGPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Block BG",
 			Flag     = "UIColorBlockBG",
 			Default  = Compkiller.Colors.BlockBackground,
@@ -10295,8 +10422,9 @@ function Compkiller.new(Config : Window)
 				applyColor("BlockBackground", color);
 			end,
 		});
+		_customColorPickers[BlockBGPicker] = "BlockBackground";
 
-		CustomColorsSection:AddColorPicker({
+		local BlockPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Block",
 			Flag     = "UIColorBlock",
 			Default  = Compkiller.Colors.BlockColor,
@@ -10305,8 +10433,9 @@ function Compkiller.new(Config : Window)
 				applyColor("BlockColor", color);
 			end,
 		});
+		_customColorPickers[BlockPicker] = "BlockColor";
 
-		CustomColorsSection:AddColorPicker({
+		local DropdownPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Dropdown",
 			Flag     = "UIColorDropdown",
 			Default  = Compkiller.Colors.DropColor,
@@ -10315,8 +10444,9 @@ function Compkiller.new(Config : Window)
 				applyColor("DropColor", color);
 			end,
 		});
+		_customColorPickers[DropdownPicker] = "DropColor";
 
-		CustomColorsSection:AddColorPicker({
+		local BorderPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Border",
 			Flag     = "UIColorBorder",
 			Default  = Compkiller.Colors.StrokeColor,
@@ -10325,8 +10455,9 @@ function Compkiller.new(Config : Window)
 				applyColor("StrokeColor", color);
 			end,
 		});
+		_customColorPickers[BorderPicker] = "StrokeColor";
 
-		CustomColorsSection:AddColorPicker({
+		local HighBorderPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Highlight Border",
 			Flag     = "UIColorHighBorder",
 			Default  = Compkiller.Colors.HighStrokeColor,
@@ -10335,8 +10466,9 @@ function Compkiller.new(Config : Window)
 				applyColor("HighStrokeColor", color);
 			end,
 		});
+		_customColorPickers[HighBorderPicker] = "HighStrokeColor";
 
-		CustomColorsSection:AddColorPicker({
+		local SeparatorPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Separator",
 			Flag     = "UIColorSeparator",
 			Default  = Compkiller.Colors.LineColor,
@@ -10345,8 +10477,9 @@ function Compkiller.new(Config : Window)
 				applyColor("LineColor", color);
 			end,
 		});
+		_customColorPickers[SeparatorPicker] = "LineColor";
 
-		CustomColorsSection:AddColorPicker({
+		local TextPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Text",
 			Flag     = "UIColorText",
 			Default  = Compkiller.Colors.SwitchColor,
@@ -10355,8 +10488,9 @@ function Compkiller.new(Config : Window)
 				applyColor("SwitchColor", color);
 			end,
 		});
+		_customColorPickers[TextPicker] = "SwitchColor";
 
-		CustomColorsSection:AddColorPicker({
+		local RiskyPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Risky",
 			Flag     = "UIColorRisky",
 			Default  = Compkiller.Colors.Risky,
@@ -10365,6 +10499,7 @@ function Compkiller.new(Config : Window)
 				applyColor("Risky", color);
 			end,
 		});
+		_customColorPickers[RiskyPicker] = "Risky";
 
 		-- Toggle's ON-state pill color normally auto-derives from Accent (a
 		-- slightly darker shade) — picking one here overrides that so future
@@ -10372,7 +10507,7 @@ function Compkiller.new(Config : Window)
 		-- ever repaints entries whose Enabled attribute is currently true, so
 		-- this can't reuse the generic applyColor helper (which applies
 		-- unconditionally) without also recoloring OFF pills.
-		CustomColorsSection:AddColorPicker({
+		local TogglePicker = CustomColorsSection:AddColorPicker({
 			Name     = "Toggle (On State)",
 			Flag     = "UIColorToggle",
 			Default  = Compkiller.Colors.Toggle,
@@ -10386,6 +10521,217 @@ function Compkiller.new(Config : Window)
 						pcall(function() v.Element[v.Property] = color end);
 					end;
 				end;
+			end,
+		});
+		_customColorPickers[TogglePicker] = "Toggle";
+
+		-- Called after Compkiller:SetTheme(v) so every Custom Colors swatch
+		-- shows what the newly-picked preset actually looks like — without
+		-- this, picking "Dark Blue" repainted the UI but left every swatch
+		-- showing whatever was previously selected (Default's colors, or a
+		-- stale prior custom edit), which is what made tweaking a preset feel
+		-- disconnected from what was on screen.
+		_refreshCustomColorSwatches = function()
+			for picker, colorKey in next, _customColorPickers do
+				local color = Compkiller.Colors[colorKey];
+				if color then
+					pcall(function() picker:SetValue(color, 0, true) end);
+				end;
+			end;
+		end;
+
+		-- ── Saved Themes ─────────────────────────────────────────────────
+		-- Independent of the config system: a config save captures every flag
+		-- (features included), while a saved theme is just the palette + font
+		-- + toggle-color override — for handing someone (or another one of
+		-- your own configs) just the look, without any of the feature state.
+		local SavedThemesSection = UITab:DrawSection({
+			Name     = "Saved Themes",
+			Position = "left",
+		});
+
+		local THEME_COLOR_KEYS = {
+			"BGDBColor", "BlockBackground", "BlockColor", "DropColor", "HighStrokeColor",
+			"Highlight", "LineColor", "MouseEnter", "Risky", "StrokeColor", "SwitchColor", "Toggle",
+		};
+
+		local function _themesDir()
+			local base = Compkiller._BaseDirectory or "Compkiller";
+			return Compkiller:_Path(base, "Themes");
+		end;
+
+		local function _ensureThemesDir()
+			pcall(function()
+				local base = Compkiller._BaseDirectory or "Compkiller";
+				if not isfolder(base) then makefolder(base); end;
+				if not isfolder(_themesDir()) then makefolder(_themesDir()); end;
+			end);
+		end;
+
+		local function _listSavedThemes()
+			_ensureThemesDir();
+			local names = {};
+			local ok, files = pcall(listfiles, _themesDir());
+			if ok then
+				for _, path in ipairs(files) do
+					local fname = path:match("([^/\\]+)%.json$");
+					if fname then table.insert(names, fname); end;
+				end;
+			end;
+			table.sort(names);
+			if #names == 0 then names = { "" }; end;
+			return names;
+		end;
+
+		local function _saveTheme(name)
+			if not name or name == "" then return false; end;
+			_ensureThemesDir();
+
+			local data = {
+				Colors = {},
+				Font = Compkiller.CurrentFontName,
+				CustomToggleColor = Compkiller.CustomToggleColor and true or false,
+			};
+
+			for _, key in ipairs(THEME_COLOR_KEYS) do
+				local c = Compkiller.Colors[key];
+				if c then
+					data.Colors[key] = { R = c.R, G = c.G, B = c.B };
+				end;
+			end;
+
+			local ok, encoded = pcall(HttpService.JSONEncode, HttpService, data);
+			if not ok then return false; end;
+
+			local okWrite = pcall(writefile, Compkiller:_Path(_themesDir(), name .. ".json"), encoded);
+			return okWrite;
+		end;
+
+		local function _loadTheme(name)
+			if not name or name == "" then return false; end;
+
+			local path = Compkiller:_Path(_themesDir(), name .. ".json");
+			if not isfile(path) then return false; end;
+
+			local okRead, raw = pcall(readfile, path);
+			if not okRead then return false; end;
+
+			local okDecode, data = pcall(HttpService.JSONDecode, HttpService, raw);
+			if not okDecode or type(data) ~= "table" or type(data.Colors) ~= "table" then return false; end;
+
+			for key, c in pairs(data.Colors) do
+				if type(c) == "table" and c.R and c.G and c.B then
+					Compkiller.Colors[key] = Color3.new(c.R, c.G, c.B);
+				end;
+			end;
+
+			if data.CustomToggleColor ~= nil then
+				Compkiller.CustomToggleColor = data.CustomToggleColor;
+			end;
+
+			Compkiller:RefreshCurrentColor();
+			pcall(_refreshCustomColorSwatches);
+
+			if type(data.Font) == "string" then
+				pcall(function() Compkiller:SetFont(data.Font) end);
+			end;
+
+			switchToCustom();
+
+			return true;
+		end;
+
+		-- AddTextBox has no GetValue() — track the live-typed text ourselves
+		-- via its Callback (which fires on every keystroke) instead.
+		local _themeNameInput = "";
+
+		SavedThemesSection:AddTextBox({
+			Name        = "Theme Name",
+			Placeholder = "My Theme",
+			Default     = "",
+			Callback    = function(text) _themeNameInput = text; end,
+		});
+
+		-- Forward-declared: the Save button (defined next) refreshes this
+		-- dropdown's values, but the dropdown itself is only created after.
+		local SavedThemeDropdown = nil;
+
+		SavedThemesSection:AddButton({
+			Name     = "Save Current Theme",
+			Callback = function()
+				local name = _themeNameInput;
+
+				if type(name) ~= "string" or name == "" then
+					pcall(function()
+						WindowArgs.Notify.new({ Title = "Theme", Content = "Type a name for the theme first.", Duration = 3 });
+					end);
+					return;
+				end;
+
+				if _saveTheme(name) then
+					pcall(function()
+						WindowArgs.Notify.new({ Title = "Theme", Content = "Saved \"" .. name .. "\".", Duration = 3 });
+					end);
+					if SavedThemeDropdown then
+						pcall(function() SavedThemeDropdown:SetValues(_listSavedThemes()) end);
+					end;
+				else
+					pcall(function()
+						WindowArgs.Notify.new({ Title = "Theme", Content = "Failed to save \"" .. name .. "\".", Duration = 3 });
+					end);
+				end;
+			end,
+		});
+
+		local _selectedTheme = nil;
+
+		SavedThemeDropdown = SavedThemesSection:AddDropdown({
+			Name    = "Saved Themes",
+			Default = _listSavedThemes()[1] or "",
+			Values  = _listSavedThemes(),
+			Callback = function(v)
+				_selectedTheme = v;
+			end,
+		});
+		_selectedTheme = SavedThemeDropdown:GetValue();
+
+		SavedThemesSection:AddButton({
+			Name     = "Load Selected Theme",
+			Callback = function()
+				if not _selectedTheme or _selectedTheme == "" then return; end;
+
+				if _loadTheme(_selectedTheme) then
+					pcall(function()
+						WindowArgs.Notify.new({ Title = "Theme", Content = "Loaded \"" .. _selectedTheme .. "\".", Duration = 3 });
+					end);
+				else
+					pcall(function()
+						WindowArgs.Notify.new({ Title = "Theme", Content = "Failed to load \"" .. _selectedTheme .. "\".", Duration = 3 });
+					end);
+				end;
+			end,
+		});
+
+		-- Confirm = true: needs a second click before a saved theme is deleted.
+		SavedThemesSection:AddButton({
+			Name        = "Delete Selected Theme",
+			Confirm     = true,
+			ConfirmText = "Click again to confirm",
+			Callback    = function()
+				if not _selectedTheme or _selectedTheme == "" then return; end;
+
+				pcall(delfile, Compkiller:_Path(_themesDir(), _selectedTheme .. ".json"));
+
+				pcall(function()
+					WindowArgs.Notify.new({ Title = "Theme", Content = "Deleted \"" .. _selectedTheme .. "\".", Duration = 3 });
+				end);
+
+				local names = _listSavedThemes();
+				_selectedTheme = names[1] or "";
+				pcall(function()
+					SavedThemeDropdown:SetValues(names);
+					SavedThemeDropdown:SetValue(_selectedTheme);
+				end);
 			end,
 		});
 
@@ -11231,6 +11577,11 @@ function Compkiller.new(Config : Window)
 			SectionText.TextSize = 14.000
 			SectionText.TextTransparency = 0.500
 			SectionText.TextXAlignment = Enum.TextXAlignment.Left
+
+			table.insert(Compkiller.Elements.Font , {
+				Element = SectionText,
+				Property = 'Font'
+			});
 
 			table.insert(Compkiller.Elements.SwitchColor , {
 				Element = SectionText,
