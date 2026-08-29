@@ -1613,6 +1613,25 @@ UserInputService.InputChanged:Connect(function(Input)
 	end;
 end);
 
+-- Same consolidation, for AddColorPicker's box/hue-strip/opacity-strip drag
+-- tracking (see _AddColorPickerPanel) — a busy Custom Colors section alone
+-- has 10+ of these, each of which used to open its own InputChanged AND
+-- InputEnded connection. One shared pair of dispatchers + registries.
+Compkiller._ColorPickerDragWatchers = {};
+Compkiller._ColorPickerDragEndWatchers = {};
+
+UserInputService.InputChanged:Connect(function(Input)
+	for _, watcher in ipairs(Compkiller._ColorPickerDragWatchers) do
+		watcher(Input);
+	end;
+end);
+
+UserInputService.InputEnded:Connect(function(Input)
+	for _, watcher in ipairs(Compkiller._ColorPickerDragEndWatchers) do
+		watcher(Input);
+	end;
+end);
+
 -- Same consolidation, for AddTextBox's Space-key re-insertion workaround (see
 -- the comment at its registration site). Each textbox used to open its own
 -- global UserInputService.InputBegan connection that fired on every keypress
@@ -3293,101 +3312,96 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		Args:Update();
 	end);
 
-	local SPAWN_THREAD;
-
-	ColorPickerWindow.InputBegan:Connect(function(Input)
-		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-			Args.IsHold = true;
-
-			if SPAWN_THREAD then
-				task.cancel(SPAWN_THREAD);
-				SPAWN_THREAD = nil;
-			end;
-
-			SPAWN_THREAD = task.spawn(function()
-				while true do task.wait()
-					if not Args.IsHold then
-						break;	
-					end;
-
-					Callback(Color3.fromHSV(H , S , V),Transparency);
-				end;
-			end);
-		end;
-	end)
-
-	ColorPickerWindow.InputEnded:Connect(function(Input)
-		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-			Args.IsHold = false;
-
-			if SPAWN_THREAD then
-				task.cancel(SPAWN_THREAD);
-				SPAWN_THREAD = nil;
-			end;
-		end;
-	end)
-
 	table.insert(Compkiller._OutsideClickWatchers, function()
 		if not Compkiller:_IsMouseOverFrame(ColorPickerWindow) then
 			ToggleUI(false);
 		end;
 	end)
 
+	-- Rewritten from a polling while-loop keyed off a shared IsHold flag (plus
+	-- a redundant ColorPickerWindow-wide callback-firing thread) to a plain
+	-- InputBegan/InputChanged/InputEnded state machine using Input.Position.
+	-- The old version read the legacy PlayerMouse.X/Y, whose coordinate space
+	-- doesn't reliably match GuiObject.AbsolutePosition when the ScreenGui has
+	-- IgnoreGuiInset = true (every window in this library does) — that's what
+	-- caused the picker to feel "finicky"/place the dot somewhere other than
+	-- the actual cursor. Input.Position from the input event itself is always
+	-- in the same coordinate space AbsolutePosition is.
+	local Dragging: string? = nil; -- "Box" | "Hue" | "Opacity" | nil
+
+	local function _UpdateFromBox(pos: Vector2 | Vector3)
+		local PosX = ColorPickBox.AbsolutePosition.X
+		local ScaleX = PosX + ColorPickBox.AbsoluteSize.X
+		local PosY = ColorPickBox.AbsolutePosition.Y
+		local ScaleY = PosY + ColorPickBox.AbsoluteSize.Y
+
+		local Value = math.clamp(pos.X, PosX, ScaleX);
+		local Vals = math.clamp(pos.Y, PosY, ScaleY);
+
+		S = (Value - PosX) / (ScaleX - PosX);
+		V = (1 - ((Vals - PosY) / (ScaleY - PosY)));
+
+		Args:Update(nil, true);
+	end;
+
+	local function _UpdateFromHue(pos: Vector2 | Vector3)
+		local ColorY = ColorRedGreenBlue.AbsolutePosition.Y
+		local ColorYM = ColorY + ColorRedGreenBlue.AbsoluteSize.Y;
+
+		local Value = math.clamp(pos.Y, ColorY, ColorYM);
+
+		H = (Value - ColorY) / (ColorYM - ColorY);
+
+		Args:Update(nil, true);
+	end;
+
+	local function _UpdateFromOpacity(pos: Vector2 | Vector3)
+		local Transparency_ = math.clamp((pos.X - ColorOpc.AbsolutePosition.X) / ColorOpc.AbsoluteSize.X, 0, 1);
+
+		Transparency = Transparency_;
+
+		Args:Update(nil, true);
+	end;
+
+	ColorPickBox.InputBegan:Connect(function(Input)
+		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+			Dragging = "Box";
+			_UpdateFromBox(Input.Position);
+		end;
+	end);
+
 	ColorRedGreenBlue.InputBegan:Connect(function(Input)
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-			Args.IsHold = true;
-
-			while (UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) or Args.IsHold) do task.wait()
-				local ColorY = ColorRedGreenBlue.AbsolutePosition.Y
-				local ColorYM = ColorY + ColorRedGreenBlue.AbsoluteSize.Y;
-				local Value = math.clamp(Mouse.Y, ColorY, ColorYM)
-				local Code = ((Value - ColorY) / (ColorYM - ColorY));
-
-				H = Code;
-
-				Args:Update(nil, true);
-			end;
+			Dragging = "Hue";
+			_UpdateFromHue(Input.Position);
 		end;
 	end);
 
 	ColorOpc.InputBegan:Connect(function(Input)
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-			Args.IsHold = true;
-
-			while (UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) or Args.IsHold) do task.wait()
-				local transparency = math.clamp((((Mouse.X) - ColorOpc.AbsolutePosition.X) / ColorOpc.AbsoluteSize.X), 0, 1);
-				local RealColor = Color3.fromHSV(H , S , V);
-
-				TextLabel.Text = "#" .. tostring(RealColor:ToHex())
-
-				Transparency = transparency;
-
-				Args:Update(nil, true);
-			end;
+			Dragging = "Opacity";
+			_UpdateFromOpacity(Input.Position);
 		end;
 	end);
 
-	ColorPickBox.InputBegan:Connect(function(Input)
+	table.insert(Compkiller._ColorPickerDragWatchers, function(Input)
+		if not Dragging then return; end;
+		if Input.UserInputType ~= Enum.UserInputType.MouseMovement and Input.UserInputType ~= Enum.UserInputType.Touch then return; end;
+
+		if Dragging == "Box" then
+			_UpdateFromBox(Input.Position);
+		elseif Dragging == "Hue" then
+			_UpdateFromHue(Input.Position);
+		elseif Dragging == "Opacity" then
+			_UpdateFromOpacity(Input.Position);
+		end;
+	end);
+
+	table.insert(Compkiller._ColorPickerDragEndWatchers, function(Input)
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-			Args.IsHold = true;
-
-			while (UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) or Args.IsHold) do task.wait();
-				local PosX = ColorPickBox.AbsolutePosition.X
-				local ScaleX = PosX + ColorPickBox.AbsoluteSize.X
-				local Value, PosY = math.clamp(Mouse.X, PosX, ScaleX), ColorPickBox.AbsolutePosition.Y
-				local ScaleY = PosY + ColorPickBox.AbsoluteSize.Y
-				local Vals = math.clamp(Mouse.Y, PosY, ScaleY)
-				local RealColor = Color3.fromHSV(H , S , V);
-
-				S = (Value - PosX) / (ScaleX - PosX);
-				V = (1 - ((Vals - PosY) / (ScaleY - PosY)));
-
-				TextLabel.Text = "#" .. tostring(RealColor:ToHex())
-
-				Args:Update(nil, true);
-			end
-		end
-	end)
+			Dragging = nil;
+		end;
+	end);
 
 	return Args;
 end;
@@ -9376,6 +9390,54 @@ function Compkiller.new(Config : Window)
 				return btn, icon, lbl, stroke;
 			end;
 
+			-- Small hover tooltip for the icon-only buttons on this row (Delete,
+			-- Share, Duplicate, Rename, Auto-load) — none of them carry a visible
+			-- text label, so there was previously no way to tell what an icon did
+			-- without already knowing this UI.
+			local function _AddTooltip(button: GuiButton, text: string)
+				local tip = Instance.new("TextLabel")
+				tip.Name = Compkiller:_RandomString()
+				tip.Parent = button
+				tip.AnchorPoint = Vector2.new(0.5, 1)
+				tip.AutomaticSize = Enum.AutomaticSize.X
+				tip.Position = UDim2.new(0.5, 0, 0, -6)
+				tip.Size = UDim2.new(0, 0, 0, 18)
+				tip.BackgroundColor3 = Compkiller.Colors.BlockBackground
+				tip.BackgroundTransparency = 1
+				tip.BorderSizePixel = 0
+				tip.ZIndex = button.ZIndex + 50
+				tip.Font = Enum.Font.GothamMedium
+				tip.Text = text
+				tip.TextColor3 = Compkiller.Colors.SwitchColor
+				tip.TextSize = 11
+				tip.TextTransparency = 1
+				tip.Visible = false
+
+				table.insert(Compkiller.Elements.BlockBackground , { Element = tip, Property = 'BackgroundColor3' });
+				table.insert(Compkiller.Elements.SwitchColor , { Element = tip, Property = 'TextColor3' });
+
+				local corner = Instance.new("UICorner")
+				corner.CornerRadius = UDim.new(0, 4)
+				corner.Parent = tip
+
+				local pad = Instance.new("UIPadding")
+				pad.PaddingLeft = UDim.new(0, 6)
+				pad.PaddingRight = UDim.new(0, 6)
+				pad.Parent = tip
+
+				Compkiller:_Hover(button, function()
+					tip.Visible = true;
+					Compkiller:_Animation(tip, TweenInfo.new(0.15), { BackgroundTransparency = 0.1, TextTransparency = 0 });
+				end, function()
+					Compkiller:_Animation(tip, TweenInfo.new(0.15), { BackgroundTransparency = 1, TextTransparency = 1 });
+					task.delay(0.15, function()
+						if tip.TextTransparency >= 1 then tip.Visible = false; end;
+					end);
+				end);
+
+				return tip;
+			end;
+
 			-- Delete button (red trash icon, no text label — icon-only pill)
 			local DelButton = Instance.new("ImageButton")
 			DelButton.Name = Compkiller:_RandomString()
@@ -9389,6 +9451,7 @@ function Compkiller.new(Config : Window)
 			DelButton.ImageColor3 = Color3.fromRGB(255, 107, 107)
 			DelButton.ImageTransparency = 1
 			DelButton.ScaleType = Enum.ScaleType.Fit
+			_AddTooltip(DelButton, "Delete");
 
 			local SaveButton, SaveIcon, SaveLabel, SaveStroke = _MakePillButton(2, "Save", "rbxassetid://10734941499")
 			local LoadButton, LoadIcon, LoadLabel, LoadStroke = _MakePillButton(3, "Load", "rbxassetid://10723344270")
@@ -9431,17 +9494,21 @@ function Compkiller.new(Config : Window)
 			-- Clipboard (Export/Share) - lucide-clipboard
 			local ShareBtn = _MakeBottomIcon(1, "rbxassetid://10709799288")
 			table.insert(Compkiller.Elements.SwitchColor , { Element = ShareBtn, Property = 'ImageColor3' });
+			_AddTooltip(ShareBtn, "Copy Share Code");
 
 			-- Duplicate - lucide-copy
 			local DupBtn = _MakeBottomIcon(2, "rbxassetid://10709812159")
 			table.insert(Compkiller.Elements.SwitchColor , { Element = DupBtn, Property = 'ImageColor3' });
+			_AddTooltip(DupBtn, "Duplicate");
 
 			-- Rename (pencil) - lucide-pencil
 			local RenameBtn = _MakeBottomIcon(3, "rbxassetid://10734919691")
 			table.insert(Compkiller.Elements.SwitchColor , { Element = RenameBtn, Property = 'ImageColor3' });
+			_AddTooltip(RenameBtn, "Rename");
 
 			-- Auto-load toggle (star - lucide-star, blue when enabled to match AUTO badge)
 			local AutoBtn = _MakeBottomIcon(4, "rbxassetid://10734966248")
+			_AddTooltip(AutoBtn, "Toggle Auto-load");
 
 			-- ======== State & API ========
 			local _isActive = false
@@ -9595,7 +9662,7 @@ function Compkiller.new(Config : Window)
 						ConfigButton.OnDelete(DelButton, confirmed);
 					end;
 				end);
-			end, 0.6);
+			end, 2.5); -- generous window: has to cover reading the "click again" toast, not just a fast double-click
 
 			DelButton.MouseButton1Click:Connect(_armDelete);
 
@@ -10019,7 +10086,10 @@ function Compkiller.new(Config : Window)
 						end;
 					end;
 
-					-- Save (overwrite with current UI state)
+					-- Save (overwrite with current UI state). Deliberately does NOT
+					-- touch _activeName — "active" means "most recently loaded",
+					-- and overwriting some other config's file with the current
+					-- state isn't the same as switching to it.
 					Btn.OnSave = function()
 						local ok = pcall(function()
 							Configuration.Config:WriteConfig({
@@ -10028,7 +10098,6 @@ function Compkiller.new(Config : Window)
 							});
 						end);
 						if ok then
-							_activeName = cfgName;
 							Btn:SetInfo(
 								cfgInfo.Author or WindowArgs.Username,
 								cfgName,
@@ -10047,14 +10116,14 @@ function Compkiller.new(Config : Window)
 					-- confirming click, nil if the window lapsed with no second click.
 					Btn.OnDelete = function(delBtnRef, confirmed)
 						if confirmed == false then
-							-- Duration matches ArmConfirm's own window (0.6s) so the
+							-- Duration matches ArmConfirm's own window (2.5s) so the
 							-- notification's built-in countdown bar is an accurate
 							-- visual of how long the user actually has left to confirm.
 							WindowArgs.Notify.new({
 								Title    = "Configs",
 								Icon     = Compkiller:_GetIcon("trash-2"),
 								Content  = "Click delete again to remove \"" .. cfgName .. "\"",
-								Duration = 0.6,
+								Duration = 2.5,
 							});
 							return;
 						end;
