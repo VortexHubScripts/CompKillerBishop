@@ -12508,7 +12508,13 @@ function Compkiller.new(Config : Window)
 			Selected.Stroke.Transparency = 0;
 
 			-- Keep the selected row in view as Up/Down walks past the visible edge.
-			local RowTop = Selected.Row.Position.Y.Offset;
+			-- Rows are positioned by UIListLayout, which never writes back to the
+			-- child's Position property (it stays 0,0 for every row) — reading
+			-- Position.Y.Offset here always returned 0, so hovering any row while
+			-- scrolling (mouse stays put, rows move underneath it) looked like
+			-- "row is above the view" and snapped CanvasPosition back to the top.
+			-- AbsolutePosition reflects where the layout actually put the row.
+			local RowTop = (Selected.Row.AbsolutePosition.Y - ResultsFrame.AbsolutePosition.Y) + ResultsFrame.CanvasPosition.Y;
 			local RowBottom = RowTop + Selected.Row.AbsoluteSize.Y;
 			local ViewTop = ResultsFrame.CanvasPosition.Y;
 			local ViewBottom = ViewTop + ResultsFrame.AbsoluteSize.Y;
