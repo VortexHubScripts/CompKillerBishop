@@ -7111,10 +7111,26 @@ end;
 -- Looks for a Medium weight first (matching this library's usual default
 -- weight for body text) and falls back to the family's base weight if that
 -- specific enum member doesn't exist.
+--
+-- Enum.Font["SomeInvalidName"] THROWS rather than returning nil, so each
+-- lookup is pcall'd individually — `Enum.Font[a] or Enum.Font[b]` looks like
+-- a safe fallback but isn't: if the first index throws, `or` never gets to
+-- evaluate the second one and the whole call aborts. Most of these families
+-- (Roboto, Montserrat, Merriweather) have no "...Medium" member at all, so
+-- without this every one of them errored out immediately.
 function Compkiller:SetFont(FamilyName: string)
-	local FontEnum = Enum.Font[FamilyName .. "Medium"] or Enum.Font[FamilyName];
+	local FontEnum;
 
-	if not FontEnum then return false; end;
+	pcall(function() FontEnum = Enum.Font[FamilyName .. "Medium"]; end);
+
+	if not FontEnum then
+		pcall(function() FontEnum = Enum.Font[FamilyName]; end);
+	end;
+
+	if not FontEnum then
+		warn("[Compkiller] SetFont: '" .. tostring(FamilyName) .. "' isn't a valid Enum.Font family");
+		return false;
+	end;
 
 	Compkiller.CurrentFontName = FamilyName;
 
