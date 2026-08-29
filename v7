@@ -381,7 +381,6 @@ local Compkiller = {
 	},
 	PerformanceMode = false,
 	HideKeybindsUI = false,
-	CurrentFontName = "Gotham",
 	WindowsNil = {},
 	NilFolder = Instance.new('Folder'),
 	ArcylicParent = CurrentCamera,
@@ -416,7 +415,6 @@ Compkiller.Elements = {
 	LineColor = {},
 	HighStrokeColor = {},
 	Toggle = {},
-	Font = {},
 };
 
 Compkiller.DragBlacklist = {};
@@ -2356,11 +2354,6 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 		BlockText.TextTransparency = 0.300
 		BlockText.TextXAlignment = Enum.TextXAlignment.Left
 
-		table.insert(Compkiller.Elements.Font,{
-			Element = BlockText,
-			Property = "Font"
-		})
-
 		table.insert(Compkiller.Elements.SwitchColor,{
 			Element = BlockText,
 			Property = "TextColor3"
@@ -2490,11 +2483,6 @@ function Compkiller:_CreateBlock(Signal)
 	BlockText.TextSize = 14.000
 	BlockText.TextTransparency = 0.300
 	BlockText.TextXAlignment = Enum.TextXAlignment.Left
-
-	table.insert(Compkiller.Elements.Font , {
-		Element = BlockText,
-		Property = 'Font'
-	});
 
 	table.insert(Compkiller.Elements.SwitchColor , {
 		Element = BlockText,
@@ -4714,11 +4702,6 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 		BlockText.TextTransparency = 0.500
 		BlockText.TextXAlignment = Enum.TextXAlignment.Left
 
-		table.insert(Compkiller.Elements.Font , {
-			Element = BlockText,
-			Property = 'Font'
-		});
-
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = BlockText,
 			Property = 'TextColor3'
@@ -5509,11 +5492,6 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		TextLabel.TextSize = 12.000
 		TextLabel.TextStrokeTransparency = 0.900
 
-		table.insert(Compkiller.Elements.Font , {
-			Element = TextLabel,
-			Property = 'Font'
-		});
-
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = TextLabel,
 			Property = 'TextColor3'
@@ -5670,11 +5648,6 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		BlockText.TextTransparency = 0.100
 		BlockText.TextXAlignment = Enum.TextXAlignment.Left
 
-		table.insert(Compkiller.Elements.Font , {
-			Element = BlockText,
-			Property = 'Font'
-		});
-
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = BlockText,
 			Property = 'TextColor3'
@@ -5779,11 +5752,6 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		ValueText.TextXAlignment = Enum.TextXAlignment.Right
 		ValueText.ClearTextOnFocus = false
 		ValueText.MultiLine = false
-
-		table.insert(Compkiller.Elements.Font , {
-			Element = ValueText,
-			Property = 'Font'
-		});
 
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = ValueText,
@@ -6063,11 +6031,6 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		BlockText.TextXAlignment = Enum.TextXAlignment.Left
 		BlockText.RichText = true
 
-		table.insert(Compkiller.Elements.Font , {
-			Element = BlockText,
-			Property = 'Font'
-		});
-
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = BlockText,
 			Property = 'TextColor3'
@@ -6106,11 +6069,6 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		DescriptionText.TextXAlignment = Enum.TextXAlignment.Left
 		DescriptionText.TextYAlignment = Enum.TextYAlignment.Top
 		DescriptionText.TextWrapped = true
-
-		table.insert(Compkiller.Elements.Font , {
-			Element = DescriptionText,
-			Property = 'Font'
-		});
 
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = DescriptionText,
@@ -6347,11 +6305,6 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		BlockText.TextSize = 14.000
 		BlockText.TextTransparency = 0.300
 		BlockText.TextXAlignment = Enum.TextXAlignment.Left
-
-		table.insert(Compkiller.Elements.Font,{
-			Element = BlockText,
-			Property = "Font"
-		})
 
 		table.insert(Compkiller.Elements.SwitchColor,{
 			Element = BlockText,
@@ -7101,46 +7054,6 @@ function Compkiller:ChangeHighlightColor(NewColor: Color3)
 			v.Element[v.Property] = Compkiller.Colors.Toggle;
 		end;
 	end;
-end;
-
--- Swaps the UI's font family. Only covers text registered into
--- Compkiller.Elements.Font (section headers, element labels, buttons,
--- dropdowns, text boxes, paragraphs, notifications, the window title) —
--- the file has far too many one-off TextLabels to retrofit every single one,
--- so this is the high-visibility subset rather than a literal 100% sweep.
--- Looks for a Medium weight first (matching this library's usual default
--- weight for body text) and falls back to the family's base weight if that
--- specific enum member doesn't exist.
---
--- Enum.Font["SomeInvalidName"] THROWS rather than returning nil, so each
--- lookup is pcall'd individually — `Enum.Font[a] or Enum.Font[b]` looks like
--- a safe fallback but isn't: if the first index throws, `or` never gets to
--- evaluate the second one and the whole call aborts. Most of these families
--- (Roboto, Montserrat, Merriweather) have no "...Medium" member at all, so
--- without this every one of them errored out immediately.
-function Compkiller:SetFont(FamilyName: string)
-	local FontEnum;
-
-	pcall(function() FontEnum = Enum.Font[FamilyName .. "Medium"]; end);
-
-	if not FontEnum then
-		pcall(function() FontEnum = Enum.Font[FamilyName]; end);
-	end;
-
-	if not FontEnum then
-		warn("[Compkiller] SetFont: '" .. tostring(FamilyName) .. "' isn't a valid Enum.Font family");
-		return false;
-	end;
-
-	Compkiller.CurrentFontName = FamilyName;
-
-	for i,v in next, Compkiller.Elements.Font do
-		if v.Element and v.Property then
-			pcall(function() v.Element[v.Property] = FontEnum end);
-		end;
-	end;
-
-	return true;
 end;
 
 function Compkiller.new(Config : Window)
@@ -8647,11 +8560,6 @@ function Compkiller.new(Config : Window)
 		SectionText.TextTransparency = 0.500
 		SectionText.TextXAlignment = Enum.TextXAlignment.Left
 
-		table.insert(Compkiller.Elements.Font , {
-			Element = SectionText,
-			Property = 'Font'
-		});
-
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = SectionText,
 			Property = 'TextColor3'
@@ -8874,11 +8782,6 @@ function Compkiller.new(Config : Window)
 		TextLabel.TextColor3 = Compkiller.Colors.SwitchColor
 		TextLabel.TextSize = 12.000
 		TextLabel.TextStrokeTransparency = 0.900
-
-		table.insert(Compkiller.Elements.Font , {
-			Element = TextLabel,
-			Property = 'Font'
-		});
 
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = TextLabel,
@@ -10422,21 +10325,6 @@ function Compkiller.new(Config : Window)
 		});
 		_themeDropdown = themeDropdown;
 
-		-- Font family. Covers section headers, element labels (toggles,
-		-- keybinds, color pickers, sliders, buttons, dropdowns), and paragraph
-		-- text — the highest-visibility text in the UI, not a literal 100%
-		-- sweep of every one-off label in the file (notification toasts and
-		-- the window title keep their current font for now).
-		AppearanceSection:AddDropdown({
-			Name    = "Font",
-			Flag    = "UIFont",
-			Default = Compkiller.CurrentFontName or "Gotham",
-			Values  = { "Gotham", "SourceSans", "Roboto", "Montserrat", "Merriweather" },
-			Callback = function(v)
-				pcall(function() Compkiller:SetFont(v) end);
-			end,
-		});
-
 		-- Called by every color picker callback; switches theme label to Custom.
 		-- Suppressed while a config load is applying flags — the pickers firing
 		-- during a load are just restoring saved values, not user edits, and the
@@ -10647,8 +10535,8 @@ function Compkiller.new(Config : Window)
 
 		-- ── Saved Themes ─────────────────────────────────────────────────
 		-- Independent of the config system: a config save captures every flag
-		-- (features included), while a saved theme is just the palette + font
-		-- + toggle-color override — for handing someone (or another one of
+		-- (features included), while a saved theme is just the palette +
+		-- toggle-color override — for handing someone (or another one of
 		-- your own configs) just the look, without any of the feature state.
 		local SavedThemesSection = UITab:DrawSection({
 			Name     = "Saved Themes",
@@ -10694,7 +10582,6 @@ function Compkiller.new(Config : Window)
 
 			local data = {
 				Colors = {},
-				Font = Compkiller.CurrentFontName,
 				CustomToggleColor = Compkiller.CustomToggleColor and true or false,
 			};
 
@@ -10736,10 +10623,6 @@ function Compkiller.new(Config : Window)
 
 			Compkiller:RefreshCurrentColor();
 			pcall(_refreshCustomColorSwatches);
-
-			if type(data.Font) == "string" then
-				pcall(function() Compkiller:SetFont(data.Font) end);
-			end;
 
 			switchToCustom();
 
@@ -11682,11 +11565,6 @@ function Compkiller.new(Config : Window)
 			SectionText.TextSize = 14.000
 			SectionText.TextTransparency = 0.500
 			SectionText.TextXAlignment = Enum.TextXAlignment.Left
-
-			table.insert(Compkiller.Elements.Font , {
-				Element = SectionText,
-				Property = 'Font'
-			});
 
 			table.insert(Compkiller.Elements.SwitchColor , {
 				Element = SectionText,
