@@ -3220,29 +3220,44 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		Transparency = TransparencyValue;
 	end;
 
-	function Args:Update(Silent: boolean?)
+	-- Instant (3rd arg): while actively dragging a slider/box, set properties
+	-- directly instead of tweening. Re-tweening all 5 of these on every single
+	-- mouse-move tick meant each drag was perpetually chasing a moving target
+	-- through dozens of overlapping, mutually-superseding 0.2s tweens — the
+	-- exact same "laggy, not really real-time" cause already fixed for window
+	-- dragging elsewhere in this file (see Compkiller:Drag). Non-drag callers
+	-- (hex box edits, SetValue, theme swatch sync) still get the smooth tween.
+	function Args:Update(Silent: boolean? , Instant: boolean?)
 		local MainColor = Color3.fromHSV(H , S , 1);
 		local RealColor = Color3.fromHSV(H , S , V);
 
-		Compkiller:_Animation(ColorPickBox,TweenInfo.new(0.2),{
-			BackgroundColor3 = Color3.fromHSV(H , 1 , 1)
-		});
+		if Instant then
+			ColorPickBox.BackgroundColor3 = Color3.fromHSV(H , 1 , 1);
+			ColorOpc.BackgroundColor3 = RealColor;
+			MouseMovement.Position = UDim2.fromScale(S , 1 - V);
+			ColorOptSlide.Position = UDim2.new(Transparency ,0 , 0.5 ,0);
+			ColorRGBSlide.Position = UDim2.new(0.5 ,0 , H ,0);
+		else
+			Compkiller:_Animation(ColorPickBox,TweenInfo.new(0.2),{
+				BackgroundColor3 = Color3.fromHSV(H , 1 , 1)
+			});
 
-		Compkiller:_Animation(ColorOpc,TweenInfo.new(0.2),{
-			BackgroundColor3 = RealColor
-		});
+			Compkiller:_Animation(ColorOpc,TweenInfo.new(0.2),{
+				BackgroundColor3 = RealColor
+			});
 
-		Compkiller:_Animation(MouseMovement,TweenInfo.new(0.2),{
-			Position = UDim2.fromScale(S , 1 - V)
-		});
+			Compkiller:_Animation(MouseMovement,TweenInfo.new(0.2),{
+				Position = UDim2.fromScale(S , 1 - V)
+			});
 
-		Compkiller:_Animation(ColorOptSlide,TweenInfo.new(0.2),{
-			Position = UDim2.new(Transparency ,0 , 0.5 ,0)
-		});
+			Compkiller:_Animation(ColorOptSlide,TweenInfo.new(0.2),{
+				Position = UDim2.new(Transparency ,0 , 0.5 ,0)
+			});
 
-		Compkiller:_Animation(ColorRGBSlide,TweenInfo.new(0.2),{
-			Position = UDim2.new(0.5 ,0 , H ,0)
-		});
+			Compkiller:_Animation(ColorRGBSlide,TweenInfo.new(0.2),{
+				Position = UDim2.new(0.5 ,0 , H ,0)
+			});
+		end;
 
 		TextLabel.Text = "#" .. tostring(RealColor:ToHex())
 
@@ -3330,7 +3345,7 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 
 				H = Code;
 
-				Args:Update();
+				Args:Update(nil, true);
 			end;
 		end;
 	end);
@@ -3347,7 +3362,7 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 
 				Transparency = transparency;
 
-				Args:Update();
+				Args:Update(nil, true);
 			end;
 		end;
 	end);
@@ -3369,7 +3384,7 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 
 				TextLabel.Text = "#" .. tostring(RealColor:ToHex())
 
-				Args:Update();
+				Args:Update(nil, true);
 			end
 		end
 	end)
@@ -9565,35 +9580,24 @@ function Compkiller.new(Config : Window)
 				task.spawn(function() if ConfigButton.OnSave then ConfigButton.OnSave(); end; end);
 			end);
 
-			-- Delete uses a DOUBLE-CLICK pattern (user-requested). Tracks last click
-			-- time; two clicks within 0.6s = confirmed delete.
-			local _lastDelClick = 0;
-			DelButton.MouseButton1Click:Connect(function()
-				local now = tick();
-				if now - _lastDelClick <= 0.6 then
-					_lastDelClick = 0;
-					task.spawn(function()
-						if ConfigButton.OnDelete then
-							ConfigButton.OnDelete(DelButton, true); -- true = confirmed
-						end;
-					end);
-				else
-					_lastDelClick = now;
-					-- Visual feedback that the first click was registered
-					DelButton.ImageTransparency = 0;
-					task.spawn(function()
-						if ConfigButton.OnDelete then
-							ConfigButton.OnDelete(DelButton, false); -- false = first click (notify only)
-						end;
-					end);
-					task.delay(0.6, function()
-						if _lastDelClick == now then
-							_lastDelClick = 0;
-							DelButton.ImageTransparency = 0.3;
-						end;
-					end);
-				end;
-			end);
+			-- Delete uses the same double-click-arm primitive as AddButton's
+			-- Confirm = true (see Compkiller:ArmConfirm), instead of the
+			-- one-off tick()-timer this used to hand-roll. ConfigButton.OnDelete
+			-- now receives the same three states ArmConfirm reports:
+			--   false = just armed (first click)
+			--   true  = confirmed (second click within the window)
+			--   nil   = disarmed by timeout, no click
+			local _armDelete = Compkiller:ArmConfirm(function(confirmed)
+				DelButton.ImageTransparency = (confirmed == false) and 0 or 0.3;
+
+				task.spawn(function()
+					if ConfigButton.OnDelete then
+						ConfigButton.OnDelete(DelButton, confirmed);
+					end;
+				end);
+			end, 0.6);
+
+			DelButton.MouseButton1Click:Connect(_armDelete);
 
 			ShareBtn.MouseButton1Click:Connect(function()
 				task.spawn(function() if ConfigButton.OnShare then ConfigButton.OnShare(); end; end);
@@ -10038,10 +10042,26 @@ function Compkiller.new(Config : Window)
 						end;
 					end;
 
-					-- Delete: button sends confirmed=false on first click, true on second (within 0.6s)
+					-- Delete: driven by Compkiller:ArmConfirm (see the button wiring
+					-- above) — confirmed is false on the arming click, true on the
+					-- confirming click, nil if the window lapsed with no second click.
 					Btn.OnDelete = function(delBtnRef, confirmed)
-						if not confirmed then
-							_Notify("Double-click delete to confirm removing \"" .. cfgName .. "\"", 2);
+						if confirmed == false then
+							-- Duration matches ArmConfirm's own window (0.6s) so the
+							-- notification's built-in countdown bar is an accurate
+							-- visual of how long the user actually has left to confirm.
+							WindowArgs.Notify.new({
+								Title    = "Configs",
+								Icon     = Compkiller:_GetIcon("trash-2"),
+								Content  = "Click delete again to remove \"" .. cfgName .. "\"",
+								Duration = 0.6,
+							});
+							return;
+						end;
+
+						if confirmed == nil then
+							-- Timed out with no second click — nothing to do, the
+							-- countdown notification above already closed itself.
 							return;
 						end;
 
