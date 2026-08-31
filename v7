@@ -9097,6 +9097,16 @@ function Compkiller.new(Config : Window)
 			BlockStroke.Parent = ConfigBlock
 			table.insert(Compkiller.Elements.StrokeColor , { Element = BlockStroke, Property = "Color" });
 
+			-- Keyboard-selection outline (search box Up/Down). Separate from
+			-- BlockStroke so arrow-key selection never fights the row's own
+			-- open/closed border state — solid only for the selected row.
+			local SelectStroke = Instance.new("UIStroke")
+			SelectStroke.Transparency = 1
+			SelectStroke.Thickness = 1.5
+			SelectStroke.Color = Compkiller.Colors.Highlight
+			SelectStroke.Parent = ConfigBlock
+			table.insert(Compkiller.Elements.Highlight , { Element = SelectStroke, Property = "Color" });
+
 			-- Left accent strip: green when this config is ACTIVE, blue when AUTO-load.
 			local AccentBar = Instance.new("Frame")
 			AccentBar.Name = Compkiller:_RandomString()
@@ -9672,6 +9682,12 @@ function Compkiller.new(Config : Window)
 			ConfigButton.OnRename = nil;
 			ConfigButton.OnDuplicate = nil;
 
+			-- Exposed so Init()'s search box can drive keyboard selection
+			-- (highlight outline + scroll-into-view) without reaching into
+			-- this closure's locals.
+			ConfigButton.ConfigBlock = ConfigBlock;
+			ConfigButton.SelectStroke = SelectStroke;
+
 			return ConfigButton;
 		end;
 
@@ -9681,6 +9697,13 @@ function Compkiller.new(Config : Window)
 			local _autoLoadName = nil;
 			local _activeName = nil;    -- most recently loaded config this session
 			local _filterText = "";     -- search filter
+
+			-- Keyboard nav over the (filtered) config list: _ShownButtons is
+			-- rebuilt every Refresh() in display order, _selectedIndex is which
+			-- one Up/Down/Enter act on. Rebuilt from scratch each time since
+			-- Refresh() destroys and recreates every row anyway.
+			local _ShownButtons = {};
+			local _selectedIndex = 0;
 
 			-- Auto-load is keyed per Roblox account (UserId), not shared across
 			-- the whole machine. Without this, whichever config was last set to
@@ -9730,6 +9753,45 @@ function Compkiller.new(Config : Window)
 					Content = content,
 					Duration = duration or 2
 				});
+			end;
+
+			local function _SetConfigSelected(Index)
+				if #_ShownButtons == 0 then
+					_selectedIndex = 0;
+					return;
+				end;
+
+				Index = math.clamp(Index, 1, #_ShownButtons);
+
+				local Prev = _ShownButtons[_selectedIndex];
+				if Prev then Prev.SelectStroke.Transparency = 1; end;
+
+				_selectedIndex = Index;
+
+				local Selected = _ShownButtons[_selectedIndex];
+				Selected.SelectStroke.Transparency = 0;
+
+				-- Keep the selected row in view as Up/Down walks past the visible
+				-- edge — same AbsolutePosition-based math as the Ctrl+K overlay,
+				-- since UIListLayout never writes back to a child's Position.
+				local Block = Selected.ConfigBlock;
+				local RowTop = (Block.AbsolutePosition.Y - ScrollingFrame.AbsolutePosition.Y) + ScrollingFrame.CanvasPosition.Y;
+				local RowBottom = RowTop + Block.AbsoluteSize.Y;
+				local ViewTop = ScrollingFrame.CanvasPosition.Y;
+				local ViewBottom = ViewTop + ScrollingFrame.AbsoluteSize.Y;
+
+				if RowTop < ViewTop then
+					ScrollingFrame.CanvasPosition = Vector2.new(0, RowTop);
+				elseif RowBottom > ViewBottom then
+					ScrollingFrame.CanvasPosition = Vector2.new(0, RowBottom - ScrollingFrame.AbsoluteSize.Y);
+				end;
+			end;
+
+			local function _ActivateConfigSelected()
+				local Btn = _ShownButtons[_selectedIndex];
+				if Btn and Btn.OnLoad then
+					task.spawn(Btn.OnLoad);
+				end;
 			end;
 
 			-- Upgrade the "Add Config" section: TextBox supports Enter-to-submit and
@@ -9801,6 +9863,23 @@ function Compkiller.new(Config : Window)
 					searchBox:GetPropertyChangedSignal("Text"):Connect(function()
 						_filterText = string.lower(searchBox.Text);
 						if Init.Refresh then Init.Refresh(); end;
+					end);
+
+					-- Arrow keys walk the (filtered) results while the search box
+					-- is focused; Enter loads whichever row is highlighted. Gated
+					-- on IsFocused() rather than a Focused/FocusLost-scoped
+					-- connection since this box is created once and lives for the
+					-- whole session — same pattern as the Ctrl+K overlay's listener.
+					UserInputService.InputBegan:Connect(function(Input, GameProcessed)
+						if not searchBox:IsFocused() then return; end;
+
+						if Input.KeyCode == Enum.KeyCode.Down then
+							_SetConfigSelected((_selectedIndex == 0 and 1) or (_selectedIndex + 1));
+						elseif Input.KeyCode == Enum.KeyCode.Up then
+							_SetConfigSelected((_selectedIndex == 0 and 1) or (_selectedIndex - 1));
+						elseif Input.KeyCode == Enum.KeyCode.Return then
+							_ActivateConfigSelected();
+						end;
 					end);
 
 					Init._SearchBox = searchBox;
@@ -9963,6 +10042,9 @@ function Compkiller.new(Config : Window)
 
 				local shownCount = 0;
 
+				table.clear(_ShownButtons);
+				_selectedIndex = 0;
+
 				for i, v in next, FullConfig do
 					local cfgInfo = v.Info or {};
 					local cfgName = v.Name;
@@ -9986,6 +10068,8 @@ function Compkiller.new(Config : Window)
 						_activeName == cfgName,
 						cfgInfo.CreatedDate
 					);
+
+					table.insert(_ShownButtons, Btn);
 
 					table.insert(__signals, TabOpenSignal:Connect(function(open)
 						Btn:Toggle(open);
@@ -10154,6 +10238,12 @@ function Compkiller.new(Config : Window)
 					end;
 
 					end; -- closes: if not _skip then
+				end;
+
+				-- Highlight the top match as soon as there's a query, so Enter
+				-- has an obvious target without requiring a Down press first.
+				if _filterText ~= "" and #_ShownButtons > 0 then
+					_SetConfigSelected(1);
 				end;
 
 				-- Empty-state message when search turns up nothing
