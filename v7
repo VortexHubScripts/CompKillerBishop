@@ -13637,6 +13637,20 @@ function Compkiller.newNotify()
 				});
 			end;
 
+			-- Quick nudge-and-snap-back so a collapsed repeat (the "xN" counter
+			-- going up) is visibly obvious, not just a silent text change --
+			-- the player can see that specific toast just got re-triggered.
+			local Pulse = function()
+				Compkiller:_Animation(NotifyFrame,TweenInfo.new(0.12,Enum.EasingStyle.Quad,Enum.EasingDirection.In),{
+					Position = UDim2.new(0,40,0,0)
+				});
+				task.delay(0.12,function()
+					Compkiller:_Animation(NotifyFrame,TweenInfo.new(0.35,Enum.EasingStyle.Back,Enum.EasingDirection.Out),{
+						Position = UDim2.new(0,0,0,0)
+					});
+				end);
+			end;
+
 			local CloseThread = nil;
 
 			-- (Re)starts the auto-close timer from right now. Cancels any
@@ -13668,6 +13682,7 @@ function Compkiller.newNotify()
 
 				Header.Text = NewNotify.Title .. " ×" .. Count;
 				UpdateText();
+				Pulse();
 				StartTimer();
 			end;
 
