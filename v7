@@ -10899,6 +10899,30 @@ function Compkiller.new(Config : Window)
 			end,
 		});
 
+		-- Consumer scripts that queue a script_key-based reload on server hop
+		-- (as opposed to relying on the executor's own Auto Execute) should
+		-- gate that behind this flag rather than always queueing it -- firing
+		-- both a queued reload AND the executor's Auto Execute on the same hop
+		-- sends two near-simultaneous logins against the same Luarmor key,
+		-- which Luarmor treats as a concurrent-session conflict and rejects/
+		-- kicks BOTH. Off by default: most users already have Auto Execute
+		-- doing this. A consumer script reads getgenv().BishopAutoExecOnHop
+		-- before calling queue_on_teleport for its own reload.
+		ControlsSection:AddParagraph({
+			Title   = "Reload On Server Hop",
+			Content = "Only enable if your executor's Auto Execute is OFF or unavailable. Using both at once can get you kicked as if your key were invalid.",
+		});
+
+		ControlsSection:AddToggle({
+			Name     = "Reload On Server Hop",
+			Flag     = "UIAutoExecOnHop",
+			Default  = false,
+			Risky    = true,
+			Callback = function(v)
+				getgenv().BishopAutoExecOnHop = v;
+			end,
+		});
+
 		-- The consumer script may never call Window:Watermark(), which left
 		-- WindowArgs._WatermarkRoot nil and made this toggle a no-op. Create
 		-- a default watermark lazily (name + FPS + clock) the first time the
