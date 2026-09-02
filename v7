@@ -10880,7 +10880,7 @@ function Compkiller.new(Config : Window)
 		ControlsSection:AddToggle({
 			Name     = "Auto Execute",
 			Flag     = "UIAutoExecOnHop",
-			Default  = false,
+			Default  = true,
 			Callback = function(v)
 				getgenv().BishopAutoExecOnHop = v;
 			end,
@@ -13706,14 +13706,21 @@ function Compkiller.newNotify()
 
 			ActiveByKey[CollapseKey] = { Collapse = Collapse, Payback = Payback };
 
+			-- Always return Payback (with a working .Close), regardless of
+			-- Duration. Previously the timed branch returned the raw
+			-- task.delay(...) thread instead, so any caller checking/calling
+			-- .Close on a normal-duration notification's return value would
+			-- error ("attempt to index thread") -- harmless as long as nobody
+			-- did that, but broken for anyone who wants to close a timed
+			-- toast early.
 			if typeof(Notify.Duration) == 'number' and Notify.Duration ~= math.huge then
-				return task.delay(0.25,function()
+				task.delay(0.25,function()
 					Show();
 					StartTimer();
 				end);
+			else
+				Show();
 			end;
-
-			Show();
 
 			return Payback;
 		end,
