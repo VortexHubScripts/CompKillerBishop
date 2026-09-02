@@ -10886,6 +10886,15 @@ function Compkiller.new(Config : Window)
 			end,
 		});
 
+		-- Toggles don't fire their Callback on creation (same reason the
+		-- Watermark toggle below has to build its default manually), so
+		-- getgenv().BishopAutoExecOnHop would otherwise stay nil -- toggle
+		-- shown ON, flag not actually set -- until the user manually
+		-- disabled and re-enabled it. Apply the Default here explicitly. If
+		-- a saved config later restores a different value, ConfigManager's
+		-- SetValue() DOES fire the Callback, so that path was never broken.
+		getgenv().BishopAutoExecOnHop = true;
+
 		-- Uses Toggle() so the keybind can bring it back. SetVisible() would
 		-- disable the root ScreenGui, which Toggle() never re-enables.
 		ControlsSection:AddToggle({
