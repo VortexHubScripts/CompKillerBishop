@@ -10877,6 +10877,29 @@ function Compkiller.new(Config : Window)
 			end);
 		end);
 
+		-- Consumer scripts that queue a script_key-based reload on server hop
+		-- (as opposed to relying on the executor's own Auto Execute) should
+		-- gate that behind this flag rather than always queueing it -- firing
+		-- both a queued reload AND the executor's Auto Execute on the same hop
+		-- sends two near-simultaneous logins against the same Luarmor key,
+		-- which Luarmor treats as a concurrent-session conflict and rejects/
+		-- kicks BOTH. Off by default: most users already have Auto Execute
+		-- doing this. A consumer script reads getgenv().BishopAutoExecOnHop
+		-- before calling queue_on_teleport for its own reload.
+		ControlsSection:AddParagraph({
+			Title   = "Reload On Server Hop",
+			Content = "Only enable if your executor's Auto Execute is OFF or unavailable. Using both at once can get you kicked as if your key were invalid.",
+		});
+
+		ControlsSection:AddToggle({
+			Name     = "Auto Execute",
+			Flag     = "UIAutoExecOnHop",
+			Default  = false,
+			Callback = function(v)
+				getgenv().BishopAutoExecOnHop = v;
+			end,
+		});
+
 		-- Uses Toggle() so the keybind can bring it back. SetVisible() would
 		-- disable the root ScreenGui, which Toggle() never re-enables.
 		ControlsSection:AddToggle({
@@ -10896,30 +10919,6 @@ function Compkiller.new(Config : Window)
 			Default  = true,
 			Callback = function(v)
 				Compkiller.NotificationsEnabled = v;
-			end,
-		});
-
-		-- Consumer scripts that queue a script_key-based reload on server hop
-		-- (as opposed to relying on the executor's own Auto Execute) should
-		-- gate that behind this flag rather than always queueing it -- firing
-		-- both a queued reload AND the executor's Auto Execute on the same hop
-		-- sends two near-simultaneous logins against the same Luarmor key,
-		-- which Luarmor treats as a concurrent-session conflict and rejects/
-		-- kicks BOTH. Off by default: most users already have Auto Execute
-		-- doing this. A consumer script reads getgenv().BishopAutoExecOnHop
-		-- before calling queue_on_teleport for its own reload.
-		ControlsSection:AddParagraph({
-			Title   = "Reload On Server Hop",
-			Content = "Only enable if your executor's Auto Execute is OFF or unavailable. Using both at once can get you kicked as if your key were invalid.",
-		});
-
-		ControlsSection:AddToggle({
-			Name     = "Reload On Server Hop",
-			Flag     = "UIAutoExecOnHop",
-			Default  = false,
-			Risky    = true,
-			Callback = function(v)
-				getgenv().BishopAutoExecOnHop = v;
 			end,
 		});
 
