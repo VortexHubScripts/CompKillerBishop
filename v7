@@ -7058,6 +7058,15 @@ end;
 
 function Compkiller.new(Config : Window)
 
+	-- If the script is executed again while a previous UI is still open,
+	-- tear down the old one first instead of stacking two windows.
+	if getgenv().Compkiller_ActiveWindow then
+		pcall(function()
+			getgenv().Compkiller_ActiveWindow:Unload();
+		end);
+		getgenv().Compkiller_ActiveWindow = nil;
+	end;
+
 	if not Config.Scale then
 		if Compkiller:_IsMobile() then
 			Config.Scale = Compkiller.Scale.Mobile;
@@ -12278,6 +12287,10 @@ function Compkiller.new(Config : Window)
 		if WindowArgs._Unloaded then return end;
 		WindowArgs._Unloaded = true;
 
+		if getgenv().Compkiller_ActiveWindow == WindowArgs then
+			getgenv().Compkiller_ActiveWindow = nil;
+		end;
+
 		-- 1) Flip every enabled toggle off so feature callbacks disable
 		--    themselves (ESP, farms, rainbow accent, etc.).
 		for _, flag in next, Compkiller.Flags do
@@ -12813,6 +12826,8 @@ function Compkiller.new(Config : Window)
 			end;
 		end);
 	end;
+
+	getgenv().Compkiller_ActiveWindow = WindowArgs;
 
 	return WindowArgs;
 end;
