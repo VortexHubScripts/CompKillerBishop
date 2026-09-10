@@ -4319,7 +4319,15 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 	function Args:AddOption()
 		local Element: ImageButton = Value:AddLink("Option");
-		local BaseZ_Index = math.random(1,15) * 100;
+
+		-- Deterministic, strictly-increasing Z-Index instead of a random 1-15
+		-- roll: with random ranges, two sibling (or nested) Options could end
+		-- up with overlapping Z ranges and z-fight whenever both were open
+		-- and visually overlapping (e.g. one flown out over another lower on
+		-- the panel). A shared monotonic counter guarantees every Option
+		-- instance ever created gets its own non-colliding range.
+		Compkiller._NextOptionZIndex = (Compkiller._NextOptionZIndex or 100) + 100;
+		local BaseZ_Index = Compkiller._NextOptionZIndex;
 
 		local Signal = Compkiller.__SIGNAL(false);
 
@@ -4329,23 +4337,36 @@ function Compkiller:_LoadOption(Value , TabSignal)
 		local Elements = Instance.new("Frame")
 		local UIListLayout = Instance.new("UIListLayout")
 		local Toggl = false;
+		local AnchorUp = false;
+
+		local GetPositions = function()
+			local MUL = Window.AbsoluteSize.Y / 2;
+			local MainPosition = UDim2.fromOffset(Element.AbsolutePosition.X,Element.AbsolutePosition.Y + 80);
+			local DropPosition = UDim2.fromOffset(MainPosition.X.Offset,MainPosition.Y.Offset + 15);
+
+			if MainPosition.Y.Offset > MUL then -- go up
+				MainPosition = UDim2.fromOffset(Element.AbsolutePosition.X,Element.AbsolutePosition.Y + 45);
+				DropPosition = UDim2.fromOffset(MainPosition.X.Offset,MainPosition.Y.Offset - 25);
+				AnchorUp = true;
+			else
+				AnchorUp = false;
+			end;
+
+			return MainPosition, DropPosition;
+		end;
+
+		local GetOpenHeight = function()
+			return math.max(UIListLayout.AbsoluteContentSize.Y, 0);
+		end;
 
 		local ToggleUI = function(bool)
 			local IsSameValue = bool == Toggl;
 
 			Toggl = bool;
 
-			local MainPosition = UDim2.fromOffset(Element.AbsolutePosition.X,Element.AbsolutePosition.Y + 80);
-			local DropPosition = UDim2.fromOffset(MainPosition.X.Offset,MainPosition.Y.Offset + 15);
-			local MUL = Window.AbsoluteSize.Y / 2;
+			local MainPosition, DropPosition = GetPositions();
 
-			if MainPosition.Y.Offset > MUL then -- go up
-				MainPosition = UDim2.fromOffset(Element.AbsolutePosition.X,Element.AbsolutePosition.Y + 45);
-				DropPosition = UDim2.fromOffset(MainPosition.X.Offset,MainPosition.Y.Offset - 25);
-				ExtractElement.AnchorPoint = Vector2.new(0,1)
-			else
-				ExtractElement.AnchorPoint = Vector2.new(0,0)
-			end;
+			ExtractElement.AnchorPoint = AnchorUp and Vector2.new(0,1) or Vector2.new(0,0);
 
 			if bool then
 				Signal:Fire(true);
@@ -4356,7 +4377,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 					Compkiller:_Animation(ExtractElement , Tween , {
 						Position = MainPosition,
 						BackgroundTransparency = 0,
-						Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y)
+						Size = UDim2.new(0, 225, 0, GetOpenHeight())
 					});
 
 					Compkiller:_Animation(UIStroke , Tween , {
@@ -4371,7 +4392,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 					Compkiller:_Animation(ExtractElement , Tween , {
 						Position = DropPosition,
 						BackgroundTransparency = 1,
-						Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y - 10)
+						Size = UDim2.new(0, 225, 0, math.max(GetOpenHeight() - 10, 0))
 					});
 
 					Compkiller:_Animation(UIStroke , Tween , {
@@ -4448,6 +4469,30 @@ function Compkiller:_LoadOption(Value , TabSignal)
 				_winSig:Connect(function(v) if not v then ToggleUI(false) end end);
 			end;
 		end;
+
+		-- Keep the panel pinned to its button and correctly sized while it's
+		-- open. Without these, dragging the window (or scrolling a tab) while
+		-- an Option is expanded leaves the panel floating in a stale spot,
+		-- and adding/removing nested elements (toggles, sliders, other
+		-- Options, etc.) inside it while open would leave it clipped or
+		-- undersized until the next click — this is what made panels with
+		-- lots of features inside them feel broken.
+		Element:GetPropertyChangedSignal("AbsolutePosition"):Connect(function()
+			if not Toggl then return end;
+
+			local MainPosition = GetPositions();
+
+			ExtractElement.AnchorPoint = AnchorUp and Vector2.new(0,1) or Vector2.new(0,0);
+			ExtractElement.Position = MainPosition;
+		end);
+
+		UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+			if not Toggl then return end;
+
+			Compkiller:_Animation(ExtractElement , TweenInfo.new(0.15) , {
+				Size = UDim2.new(0, 225, 0, GetOpenHeight())
+			});
+		end);
 
 		-- InputBegan (press) instead of MouseButton1Click (press+matching release) so the
 		-- open never silently drops when the release lands a frame after something else on
