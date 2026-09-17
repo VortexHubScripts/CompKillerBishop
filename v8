@@ -4194,14 +4194,13 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			local KeyName = (typeof(Selected) == "string" and Selected) or Selected.Name;
 
-			-- Same conflict check as the section-level AddKeybind: clear any
-			-- OTHER toggle/slider auto-keybind already sitting on this exact
-			-- key, and flash red here to make the swap obvious.
+			-- Same conflict rule as the section-level AddKeybind: REJECT this
+			-- new assignment if another toggle/slider auto-keybind already
+			-- holds this exact key -- flash red, snap back, and notify which
+			-- toggle it's already bound to, rather than stealing the key.
 			if KeyName ~= Config.Default and Compkiller._AllAutoKeybinds then
 				for _, Other in ipairs(Compkiller._AllAutoKeybinds) do
 					if Other.Keybind == KeyName then
-						Other:LoadSettings({ Key = nil, Mode = Other.Mode });
-
 						Compkiller:_Animation(Keybind.Root, TweenInfo.new(0.1), {
 							BackgroundColor3 = Color3.fromRGB(255, 90, 90),
 							BackgroundTransparency = 0,
@@ -4214,7 +4213,18 @@ function Compkiller:_LoadOption(Value , TabSignal)
 							});
 						end);
 
-						break;
+						Keybind.SetValue(Config.Default);
+
+						pcall(function()
+							Compkiller.newNotify().new({
+								Icon = "alert-triangle",
+								Title = "Keybind already in use",
+								Content = tostring(KeyName) .. " is already bound to \"" .. tostring(Other.Name or "another toggle") .. "\".",
+								Duration = 4,
+							});
+						end);
+
+						return;
 					end;
 				end;
 			end;
@@ -5556,16 +5566,16 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			local KeyName = typeof(Selected) == "string" and Selected or Selected.Name;
 
 			-- Conflict check: if this exact key is already bound to a
-			-- DIFFERENT toggle/slider's auto-keybind, clear that one instead
-			-- of letting two of them silently fight over the same key, and
-			-- flash this field red so the swap is obvious. Skipped when
-			-- rebinding to the same key this field already had -- that's not
-			-- a conflict with "another" keybind, it's a no-op.
+			-- DIFFERENT toggle/slider's auto-keybind, REJECT this new
+			-- assignment (the existing bind wins, not the new attempt) --
+			-- flash this field red and snap it back to whatever it already
+			-- held, and notify the player which toggle is already using it,
+			-- instead of silently stealing the key out from under it. Skipped
+			-- when rebinding to the same key this field already had -- that's
+			-- not a conflict with "another" keybind, it's a no-op.
 			if KeyName ~= Config.Default and Compkiller._AllAutoKeybinds then
 				for _, Other in ipairs(Compkiller._AllAutoKeybinds) do
 					if Other.Keybind == KeyName then
-						Other:LoadSettings({ Key = nil, Mode = Other.Mode });
-
 						Compkiller:_Animation(Keybind.Root, TweenInfo.new(0.1), {
 							BackgroundColor3 = Color3.fromRGB(255, 90, 90),
 							BackgroundTransparency = 0,
@@ -5578,7 +5588,18 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 							});
 						end);
 
-						break;
+						Keybind.SetValue(Config.Default); -- snap back, don't keep "..."
+
+						pcall(function()
+							Compkiller.newNotify().new({
+								Icon = "alert-triangle",
+								Title = "Keybind already in use",
+								Content = tostring(KeyName) .. " is already bound to \"" .. tostring(Other.Name or "another toggle") .. "\".",
+								Duration = 4,
+							});
+						end);
+
+						return;
 					end;
 				end;
 			end;
@@ -11886,6 +11907,38 @@ function Compkiller.new(Config : Window)
 				end;
 			end;
 
+			-- Lets a caller hide the ENTIRE tab (sidebar button + content),
+			-- not just what's inside it -- e.g. Window:DrawKeybindManager
+			-- hiding itself while "Hide Keybinds UI" is on. If this tab
+			-- happens to be the one currently open when hidden, falls back to
+			-- selecting the first tab in the window instead of leaving a
+			-- blank pane with no visibly-selected sidebar entry.
+			TabArgs.Root = TabButton;
+			TabArgs.ContentRoot = TabContent;
+
+			function TabArgs:SetVisible(Visible: boolean)
+				TabButton.Visible = Visible;
+
+				if not Visible and WindowArgs.SelectedTab == TabButton then
+					local FallbackEntry = nil;
+
+					for _, Entry in ipairs(WindowArgs.Tabs) do
+						if Entry.Root ~= TabButton and Entry.Root.Visible then
+							FallbackEntry = Entry;
+							break;
+						end;
+					end;
+
+					if FallbackEntry then
+						for _, Entry in ipairs(WindowArgs.Tabs) do
+							Entry.Remote:Fire(Entry.Root == FallbackEntry.Root);
+						end;
+					else
+						TabContent.Visible = false;
+					end;
+				end;
+			end;
+
 			WindowArgs:_RegisterSearch({
 				Text = TabConfig.Name,
 				TabName = TabConfig.Name,
@@ -12876,18 +12929,246 @@ function Compkiller.new(Config : Window)
 			return (typeof(Selected) == "string" and Selected) or Selected.Name;
 		end;
 
+		-- Card-style row: reuses AddLabel purely to reserve a correctly laid
+		-- out slot in the section (sizing/list order/search indexing), then
+		-- strips its default single-line look and rebuilds a proper row on
+		-- top of the same Root Frame -- status dot + name/mode on the left,
+		-- a keycap-style key badge (click it to rebind) and a small clear
+		-- button on the right. Same visual language as the on-screen active-
+		-- keybinds HUD badge, so it actually looks like part of this UI.
+		local function BuildKeyRow(AutoKeybind, IsConflict)
+			local RowArgs = ListSection:AddLabel({ Name = "" });
+			local Row = RowArgs.Root;
+
+			local OldText = Row:FindFirstChildOfClass("TextLabel");
+			local OldLine = Row:FindFirstChildOfClass("Frame");
+			if OldText then OldText:Destroy(); end;
+			if OldLine then OldLine:Destroy(); end;
+
+			Row.Size = UDim2.new(1, -1, 0, 44);
+			Row.BackgroundColor3 = Compkiller.Colors.BlockColor;
+			Row.BackgroundTransparency = 0.35;
+
+			table.insert(Compkiller.Elements.BlockColor, { Element = Row, Property = "BackgroundColor3" });
+
+			local RowCorner = Instance.new("UICorner");
+			RowCorner.CornerRadius = UDim.new(0, 6);
+			RowCorner.Parent = Row;
+
+			local DangerColor = Color3.fromRGB(255, 90, 90);
+
+			local Dot = Instance.new("Frame");
+			Dot.AnchorPoint = Vector2.new(0, 0.5);
+			Dot.BackgroundColor3 = IsConflict and DangerColor or Compkiller.Colors.Highlight;
+			Dot.BorderSizePixel = 0;
+			Dot.Position = UDim2.new(0, 12, 0.5, 0);
+			Dot.Size = UDim2.new(0, 7, 0, 7);
+			Dot.ZIndex = Row.ZIndex + 1;
+			Dot.Parent = Row;
+
+			if not IsConflict then
+				table.insert(Compkiller.Elements.Highlight, { Element = Dot, Property = "BackgroundColor3" });
+			end;
+
+			local DotCorner = Instance.new("UICorner");
+			DotCorner.CornerRadius = UDim.new(1, 0);
+			DotCorner.Parent = Dot;
+
+			local Settings = AutoKeybind:GetSettings();
+			local ModeText = (Settings.Mode == 2) and "Toggle" or "Hold";
+			local DisplayName = AutoKeybind.Name or "Unnamed";
+
+			local NameLabel = Instance.new("TextLabel");
+			NameLabel.BackgroundTransparency = 1;
+			NameLabel.Position = UDim2.new(0, 26, 0, 6);
+			NameLabel.Size = UDim2.new(1, -110, 0, 16);
+			NameLabel.ZIndex = Row.ZIndex + 1;
+			NameLabel.Font = Enum.Font.GothamMedium;
+			NameLabel.Text = DisplayName;
+			NameLabel.TextColor3 = Compkiller.Colors.SwitchColor;
+			NameLabel.TextSize = 13;
+			NameLabel.TextXAlignment = Enum.TextXAlignment.Left;
+			NameLabel.TextTruncate = Enum.TextTruncate.AtEnd;
+			NameLabel.Parent = Row;
+
+			table.insert(Compkiller.Elements.SwitchColor, { Element = NameLabel, Property = "TextColor3" });
+
+			local ModeLabel = Instance.new("TextLabel");
+			ModeLabel.BackgroundTransparency = 1;
+			ModeLabel.Position = UDim2.new(0, 26, 0, 22);
+			ModeLabel.Size = UDim2.new(1, -110, 0, 14);
+			ModeLabel.ZIndex = Row.ZIndex + 1;
+			ModeLabel.Font = Enum.Font.Gotham;
+			ModeLabel.TextSize = 11;
+			ModeLabel.TextXAlignment = Enum.TextXAlignment.Left;
+			ModeLabel.Parent = Row;
+
+			if IsConflict then
+				ModeLabel.Text = ModeText .. " Mode  \226\128\162  Conflicting key";
+				ModeLabel.TextColor3 = DangerColor;
+				ModeLabel.TextTransparency = 0;
+			else
+				ModeLabel.Text = ModeText .. " Mode";
+				ModeLabel.TextColor3 = Compkiller.Colors.SwitchColor;
+				ModeLabel.TextTransparency = 0.45;
+
+				table.insert(Compkiller.Elements.SwitchColor, { Element = ModeLabel, Property = "TextColor3" });
+			end;
+
+			-- Clear button
+			local ClearBtn = Instance.new("Frame");
+			ClearBtn.AnchorPoint = Vector2.new(1, 0.5);
+			ClearBtn.BackgroundColor3 = Compkiller.Colors.DropColor;
+			ClearBtn.BackgroundTransparency = 0.3;
+			ClearBtn.BorderSizePixel = 0;
+			ClearBtn.Position = UDim2.new(1, -10, 0.5, 0);
+			ClearBtn.Size = UDim2.new(0, 24, 0, 24);
+			ClearBtn.ZIndex = Row.ZIndex + 1;
+			ClearBtn.Parent = Row;
+
+			table.insert(Compkiller.Elements.DropColor, { Element = ClearBtn, Property = "BackgroundColor3" });
+
+			local ClearCorner = Instance.new("UICorner");
+			ClearCorner.CornerRadius = UDim.new(0, 5);
+			ClearCorner.Parent = ClearBtn;
+
+			local ClearLabel = Instance.new("TextLabel");
+			ClearLabel.BackgroundTransparency = 1;
+			ClearLabel.Size = UDim2.new(1, 0, 1, 0);
+			ClearLabel.ZIndex = ClearBtn.ZIndex + 1;
+			ClearLabel.Font = Enum.Font.GothamBold;
+			ClearLabel.Text = "\226\156\149";
+			ClearLabel.TextColor3 = DangerColor;
+			ClearLabel.TextSize = 13;
+			ClearLabel.Parent = ClearBtn;
+
+			Compkiller:_Hover(ClearBtn, function()
+				Compkiller:_Animation(ClearBtn, TweenInfo.new(0.15), { BackgroundTransparency = 0 });
+			end, function()
+				Compkiller:_Animation(ClearBtn, TweenInfo.new(0.15), { BackgroundTransparency = 0.3 });
+			end);
+
+			Compkiller:_Input(ClearBtn, function()
+				local Current = AutoKeybind:GetSettings();
+				AutoKeybind:LoadSettings({ Key = nil, Mode = Current.Mode });
+				if BuildRows then BuildRows(); end;
+			end);
+
+			-- Keycap-style key badge -- click it to rebind, same "listening..."
+			-- pulse the on-screen HUD/right-click panel use elsewhere.
+			local Badge = Instance.new("Frame");
+			Badge.AnchorPoint = Vector2.new(1, 0.5);
+			Badge.BackgroundColor3 = Compkiller.Colors.BlockBackground;
+			Badge.BorderSizePixel = 0;
+			Badge.Position = UDim2.new(1, -42, 0.5, 0);
+			Badge.Size = UDim2.new(0, 62, 0, 24);
+			Badge.ZIndex = Row.ZIndex + 1;
+			Badge.Parent = Row;
+
+			table.insert(Compkiller.Elements.BlockBackground, { Element = Badge, Property = "BackgroundColor3" });
+
+			local BadgeCorner = Instance.new("UICorner");
+			BadgeCorner.CornerRadius = UDim.new(0, 5);
+			BadgeCorner.Parent = Badge;
+
+			local BadgeStroke = Instance.new("UIStroke");
+			BadgeStroke.Color = IsConflict and DangerColor or Compkiller.Colors.HighStrokeColor;
+			BadgeStroke.Thickness = 1;
+			BadgeStroke.Parent = Badge;
+
+			if not IsConflict then
+				table.insert(Compkiller.Elements.HighStrokeColor, { Element = BadgeStroke, Property = "Color" });
+			end;
+
+			local BadgeGradient = Instance.new("UIGradient");
+			BadgeGradient.Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, Color3.new(1, 1, 1)),
+				ColorSequenceKeypoint.new(1, Color3.new(0.55, 0.55, 0.55)),
+			});
+			BadgeGradient.Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0.85),
+				NumberSequenceKeypoint.new(1, 0.97),
+			});
+			BadgeGradient.Rotation = 90;
+			BadgeGradient.Parent = Badge;
+
+			local BadgeLabel = Instance.new("TextLabel");
+			BadgeLabel.AnchorPoint = Vector2.new(0.5, 0.5);
+			BadgeLabel.BackgroundTransparency = 1;
+			BadgeLabel.Position = UDim2.new(0.5, 0, 0.5, -1);
+			BadgeLabel.Size = UDim2.new(1, -6, 1, 0);
+			BadgeLabel.ZIndex = Badge.ZIndex + 1;
+			BadgeLabel.Font = Enum.Font.GothamBold;
+			BadgeLabel.Text = tostring(Settings.Key);
+			BadgeLabel.TextColor3 = Compkiller.Colors.SwitchColor;
+			BadgeLabel.TextSize = 12;
+			BadgeLabel.TextTruncate = Enum.TextTruncate.AtEnd;
+			BadgeLabel.Parent = Badge;
+
+			table.insert(Compkiller.Elements.SwitchColor, { Element = BadgeLabel, Property = "TextColor3" });
+
+			Compkiller:_Hover(Badge, function()
+				Compkiller:_Animation(Badge, TweenInfo.new(0.15), { BackgroundTransparency = 0.2 });
+			end, function()
+				Compkiller:_Animation(Badge, TweenInfo.new(0.15), { BackgroundTransparency = 0 });
+			end);
+
+			Compkiller:_Input(Badge, function()
+				local PreviousText = BadgeLabel.Text;
+
+				BadgeLabel.Text = "...";
+
+				local PulseTween = Compkiller:_Animation(Badge, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+					BackgroundTransparency = 0.5,
+				});
+
+				local KeyName = CaptureKey();
+
+				PulseTween:Cancel();
+				Badge.BackgroundTransparency = 0;
+
+				if not KeyName or KeyName == Settings.Key then
+					BadgeLabel.Text = PreviousText;
+					return;
+				end;
+
+				-- Same conflict rule as every other keybind field: REJECT this
+				-- assignment if another entry already holds the key, flash red,
+				-- and notify which toggle it's bound to, instead of stealing it.
+				for _, Other in ipairs(Compkiller._AllAutoKeybinds or {}) do
+					if Other ~= AutoKeybind and Other.Keybind == KeyName then
+						BadgeLabel.Text = PreviousText;
+
+						Compkiller:_Animation(Badge, TweenInfo.new(0.1), { BackgroundColor3 = DangerColor, BackgroundTransparency = 0 });
+
+						task.delay(0.35, function()
+							Compkiller:_Animation(Badge, TweenInfo.new(0.3), { BackgroundColor3 = Compkiller.Colors.BlockBackground });
+						end);
+
+						pcall(function()
+							Compkiller.newNotify().new({
+								Icon = "alert-triangle",
+								Title = "Keybind already in use",
+								Content = tostring(KeyName) .. " is already bound to \"" .. tostring(Other.Name or "another toggle") .. "\".",
+								Duration = 4,
+							});
+						end);
+
+						return;
+					end;
+				end;
+
+				local Current = AutoKeybind:GetSettings();
+				AutoKeybind:LoadSettings({ Key = KeyName, Mode = Current.Mode });
+
+				if BuildRows then BuildRows(); end;
+			end);
+
+			return RowArgs;
+		end;
+
 		BuildRows = function()
 			ClearRows();
-
-			-- Only enabled to be seen while the player has "Hide Keybinds UI"
-			-- turned OFF -- if they've hidden that UI, don't show a second
-			-- keybind surface here either.
-			if Compkiller.HideKeybindsUI then
-				table.insert(RowHolders, ListSection:AddLabel({
-					Name = "Hidden while \"Hide Keybinds UI\" is enabled in UI Settings \226\134\146 Controls.",
-				}));
-				return;
-			end;
 
 			-- Only currently-BOUND entries -- an unbound toggle isn't a
 			-- keybind worth listing here.
@@ -12904,70 +13185,21 @@ function Compkiller.new(Config : Window)
 				return;
 			end;
 
-			-- Count how many bound entries currently share each key.
+			-- Count how many bound entries currently share each key. Conflicts
+			-- shouldn't really accumulate anymore (new assignments are rejected
+			-- up front), but this stays as a display-only safety net for binds
+			-- restored from an old config saved before that rule existed.
 			local KeyCounts = {};
 			for _, AutoKeybind in ipairs(Bound) do
 				local Settings = AutoKeybind:GetSettings();
 				KeyCounts[Settings.Key] = (KeyCounts[Settings.Key] or 0) + 1;
 			end;
 
-			local HasConflicts = false;
-			for _, Count in pairs(KeyCounts) do
-				if Count > 1 then HasConflicts = true; break; end;
-			end;
-
-			if HasConflicts then
-				table.insert(RowHolders, ListSection:AddLabel({
-					Name = "<font color=\"#FFC430\">\226\154\160 Some keys below are bound to more than one toggle.</font>",
-				}));
-			end;
-
 			for _, AutoKeybind in ipairs(Bound) do
 				local Settings = AutoKeybind:GetSettings();
-				local ModeText = (Settings.Mode == 2) and "Toggle" or "Hold";
 				local IsConflict = KeyCounts[Settings.Key] > 1;
-				local DisplayName = AutoKeybind.Name or "Unnamed";
 
-				local RowText = string.format("%s  \226\128\148  %s (%s)", DisplayName, tostring(Settings.Key), ModeText);
-
-				if IsConflict then
-					RowText = "<font color=\"#FF6B6B\">" .. RowText .. "</font>";
-				end;
-
-				table.insert(RowHolders, ListSection:AddLabel({ Name = RowText }));
-
-				table.insert(RowHolders, ListSection:AddButton({
-					Name = "Rebind: " .. DisplayName,
-					Callback = function()
-						local KeyName = CaptureKey();
-
-						if KeyName then
-							-- Same conflict rule as every other keybind field: clear
-							-- whichever OTHER entry already holds this key instead of
-							-- letting two of them end up bound to the same one. The
-							-- list rebuild below (Bound-only + red conflict tint)
-							-- reflects the swap immediately.
-							for _, Other in ipairs(Compkiller._AllAutoKeybinds or {}) do
-								if Other ~= AutoKeybind and Other.Keybind == KeyName then
-									Other:LoadSettings({ Key = nil, Mode = Other.Mode });
-								end;
-							end;
-
-							local Current = AutoKeybind:GetSettings();
-							AutoKeybind:LoadSettings({ Key = KeyName, Mode = Current.Mode });
-							BuildRows();
-						end;
-					end,
-				}));
-
-				table.insert(RowHolders, ListSection:AddButton({
-					Name = "Clear: " .. DisplayName,
-					Callback = function()
-						local Current = AutoKeybind:GetSettings();
-						AutoKeybind:LoadSettings({ Key = nil, Mode = Current.Mode });
-						BuildRows();
-					end,
-				}));
+				table.insert(RowHolders, BuildKeyRow(AutoKeybind, IsConflict));
 			end;
 		end;
 
@@ -12975,8 +13207,12 @@ function Compkiller.new(Config : Window)
 		-- window, not just on the next manual Refresh.
 		Compkiller._HideKeybindsUIListeners = Compkiller._HideKeybindsUIListeners or {};
 		table.insert(Compkiller._HideKeybindsUIListeners, function()
-			if BuildRows then BuildRows(); end;
+			KBTab:SetVisible(not Compkiller.HideKeybindsUI);
 		end);
+
+		-- Hides the whole tab (sidebar entry + content), not just its list,
+		-- while the player has "Hide Keybinds UI" turned on.
+		KBTab:SetVisible(not Compkiller.HideKeybindsUI);
 
 		BuildRows();
 
