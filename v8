@@ -12945,7 +12945,14 @@ function Compkiller.new(Config : Window)
 			if OldText then OldText:Destroy(); end;
 			if OldLine then OldLine:Destroy(); end;
 
-			Row.Size = UDim2.new(1, -1, 0, 44);
+			-- Deliberately NOT touching Row.Size here: AddLabel's own
+			-- UpdateScale() already kicked off a tween settling it around
+			-- ~30px for this (empty) Name, and fighting that with a direct
+			-- Size assignment raced it -- the tween kept winning a few frames
+			-- later and snapped the row back down, clipping everything below
+			-- it (ClipsDescendants = true). Building the row as a single
+			-- vertically-centered line instead of two stacked ones means it
+			-- fits fine in whatever height AddLabel settles on.
 			Row.BackgroundColor3 = Compkiller.Colors.BlockColor;
 			Row.BackgroundTransparency = 0.35;
 
@@ -12978,51 +12985,41 @@ function Compkiller.new(Config : Window)
 			local ModeText = (Settings.Mode == 2) and "Toggle" or "Hold";
 			local DisplayName = AutoKeybind.Name or "Unnamed";
 
+			-- Single vertically-centered line (name + mode together) instead
+			-- of two stacked labels, so the row works at whatever height
+			-- AddLabel settles it to instead of assuming a fixed tall Size.
 			local NameLabel = Instance.new("TextLabel");
+			NameLabel.AnchorPoint = Vector2.new(0, 0.5);
 			NameLabel.BackgroundTransparency = 1;
-			NameLabel.Position = UDim2.new(0, 26, 0, 6);
-			NameLabel.Size = UDim2.new(1, -110, 0, 16);
+			NameLabel.Position = UDim2.new(0, 26, 0.5, 0);
+			NameLabel.Size = UDim2.new(1, -120, 1, 0);
 			NameLabel.ZIndex = Row.ZIndex + 1;
 			NameLabel.Font = Enum.Font.GothamMedium;
-			NameLabel.Text = DisplayName;
-			NameLabel.TextColor3 = Compkiller.Colors.SwitchColor;
 			NameLabel.TextSize = 13;
 			NameLabel.TextXAlignment = Enum.TextXAlignment.Left;
 			NameLabel.TextTruncate = Enum.TextTruncate.AtEnd;
+			NameLabel.RichText = true;
 			NameLabel.Parent = Row;
 
-			table.insert(Compkiller.Elements.SwitchColor, { Element = NameLabel, Property = "TextColor3" });
-
-			local ModeLabel = Instance.new("TextLabel");
-			ModeLabel.BackgroundTransparency = 1;
-			ModeLabel.Position = UDim2.new(0, 26, 0, 22);
-			ModeLabel.Size = UDim2.new(1, -110, 0, 14);
-			ModeLabel.ZIndex = Row.ZIndex + 1;
-			ModeLabel.Font = Enum.Font.Gotham;
-			ModeLabel.TextSize = 11;
-			ModeLabel.TextXAlignment = Enum.TextXAlignment.Left;
-			ModeLabel.Parent = Row;
-
 			if IsConflict then
-				ModeLabel.Text = ModeText .. " Mode  \226\128\162  Conflicting key";
-				ModeLabel.TextColor3 = DangerColor;
-				ModeLabel.TextTransparency = 0;
+				NameLabel.Text = DisplayName .. "  <font color=\"#FF5A5A\" size=\"11\">"
+					.. ModeText .. " Mode \226\128\162 Conflicting key</font>";
 			else
-				ModeLabel.Text = ModeText .. " Mode";
-				ModeLabel.TextColor3 = Compkiller.Colors.SwitchColor;
-				ModeLabel.TextTransparency = 0.45;
-
-				table.insert(Compkiller.Elements.SwitchColor, { Element = ModeLabel, Property = "TextColor3" });
+				NameLabel.Text = DisplayName .. "  <font transparency=\"0.45\" size=\"11\">" .. ModeText .. " Mode</font>";
 			end;
 
-			-- Clear button
+			table.insert(Compkiller.Elements.SwitchColor, { Element = NameLabel, Property = "TextColor3" });
+			NameLabel.TextColor3 = Compkiller.Colors.SwitchColor;
+
+			-- Clear button -- same trash icon/color the Config tab's delete
+			-- button uses, not a plain "X".
 			local ClearBtn = Instance.new("Frame");
 			ClearBtn.AnchorPoint = Vector2.new(1, 0.5);
 			ClearBtn.BackgroundColor3 = Compkiller.Colors.DropColor;
 			ClearBtn.BackgroundTransparency = 0.3;
 			ClearBtn.BorderSizePixel = 0;
 			ClearBtn.Position = UDim2.new(1, -10, 0.5, 0);
-			ClearBtn.Size = UDim2.new(0, 24, 0, 24);
+			ClearBtn.Size = UDim2.new(0, 22, 0, 22);
 			ClearBtn.ZIndex = Row.ZIndex + 1;
 			ClearBtn.Parent = Row;
 
@@ -13032,15 +13029,16 @@ function Compkiller.new(Config : Window)
 			ClearCorner.CornerRadius = UDim.new(0, 5);
 			ClearCorner.Parent = ClearBtn;
 
-			local ClearLabel = Instance.new("TextLabel");
-			ClearLabel.BackgroundTransparency = 1;
-			ClearLabel.Size = UDim2.new(1, 0, 1, 0);
-			ClearLabel.ZIndex = ClearBtn.ZIndex + 1;
-			ClearLabel.Font = Enum.Font.GothamBold;
-			ClearLabel.Text = "\226\156\149";
-			ClearLabel.TextColor3 = DangerColor;
-			ClearLabel.TextSize = 13;
-			ClearLabel.Parent = ClearBtn;
+			local ClearIcon = Instance.new("ImageLabel");
+			ClearIcon.AnchorPoint = Vector2.new(0.5, 0.5);
+			ClearIcon.BackgroundTransparency = 1;
+			ClearIcon.Position = UDim2.new(0.5, 0, 0.5, 0);
+			ClearIcon.Size = UDim2.new(0, 14, 0, 14);
+			ClearIcon.ZIndex = ClearBtn.ZIndex + 1;
+			ClearIcon.Image = Compkiller:CacheImage("rbxassetid://10747362393");
+			ClearIcon.ImageColor3 = DangerColor;
+			ClearIcon.ScaleType = Enum.ScaleType.Fit;
+			ClearIcon.Parent = ClearBtn;
 
 			Compkiller:_Hover(ClearBtn, function()
 				Compkiller:_Animation(ClearBtn, TweenInfo.new(0.15), { BackgroundTransparency = 0 });
@@ -13060,8 +13058,8 @@ function Compkiller.new(Config : Window)
 			Badge.AnchorPoint = Vector2.new(1, 0.5);
 			Badge.BackgroundColor3 = Compkiller.Colors.BlockBackground;
 			Badge.BorderSizePixel = 0;
-			Badge.Position = UDim2.new(1, -42, 0.5, 0);
-			Badge.Size = UDim2.new(0, 62, 0, 24);
+			Badge.Position = UDim2.new(1, -40, 0.5, 0);
+			Badge.Size = UDim2.new(0, 60, 0, 22);
 			Badge.ZIndex = Row.ZIndex + 1;
 			Badge.Parent = Row;
 
