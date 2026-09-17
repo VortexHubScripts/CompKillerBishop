@@ -403,8 +403,8 @@ local Compkiller = {
 	-- (empty string or "rbxassetid://0"), so this never hard-fails either way.
 	SFXAssets = {
 		Click        = "rbxassetid://876939830",
-		ToggleOpen   = "rbxassetid://2375539277",
-		Notification = "rbxassetid://170765130",
+		ToggleOpen   = "rbxassetid://9120093415",
+		Notification = "rbxassetid://120024000243640",
 	},
 };
 
@@ -6292,9 +6292,17 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			UpdateScale();
 		end;
 
+		function Args:GetTitle()
+			return BlockText.Text;
+		end;
+
 		function Args:SetContent(content)
 			DescriptionText.Text = content;
 			UpdateScale();
+		end;
+
+		function Args:GetContent()
+			return DescriptionText.Text;
 		end;
 
 		Args.Signal = Signal:Connect(function(bool)
@@ -6353,12 +6361,11 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		LabelText.Name = Compkiller:_RandomString()
 		LabelText.Parent = Label
-		LabelText.AnchorPoint = Vector2.new(0, 0.5)
 		LabelText.BackgroundTransparency = 1.000
 		LabelText.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		LabelText.BorderSizePixel = 0
-		LabelText.Position = UDim2.new(0, 12, 0.5, 0)
-		LabelText.Size = UDim2.new(1, -20, 0, 25)
+		LabelText.Position = UDim2.new(0, 12, 0, 5)
+		LabelText.Size = UDim2.new(1, -20, 1, -10)
 		LabelText.ZIndex = Zindex + 3
 		LabelText.Font = Enum.Font.GothamMedium
 		LabelText.Text = Config.Name
@@ -6366,12 +6373,41 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		LabelText.TextSize = 13.000
 		LabelText.TextTransparency = 0.400
 		LabelText.TextXAlignment = Enum.TextXAlignment.Left
+		LabelText.TextYAlignment = Enum.TextYAlignment.Top
+		LabelText.TextWrapped = true
 		LabelText.RichText = true
 
 		table.insert(Compkiller.Elements.SwitchColor, {
 			Element = LabelText,
 			Property = "TextColor3"
 		});
+
+		-- SetText() can hand this a much longer string than the original Name —
+		-- without this, a fixed 30px/single-line Label would just clip it
+		-- instead of actually showing the update. Same wrap-width-driven
+		-- resize approach as AddParagraph's DescriptionText.
+		local _lastWidth = -1;
+
+		local UpdateScale = function()
+			local Width = LabelText.AbsoluteSize.X;
+			if Width <= 0 then Width = math.max(Label.AbsoluteSize.X - 20, 200); end;
+
+			_lastWidth = Width;
+
+			local TextScale = TextService:GetTextSize(LabelText.Text, LabelText.TextSize, LabelText.Font, Vector2.new(Width, math.huge));
+
+			Compkiller:_Animation(Label, TweenInfo.new(0.15), {
+				Size = UDim2.new(1, -1, 0, math.max(TextScale.Y + 15, 30))
+			});
+		end;
+
+		UpdateScale();
+
+		LabelText:GetPropertyChangedSignal('AbsoluteSize'):Connect(function()
+			if LabelText.AbsoluteSize.X ~= _lastWidth then
+				UpdateScale();
+			end;
+		end);
 
 		BlockLine.Name = Compkiller:_RandomString()
 		BlockLine.Parent = Label
@@ -6395,6 +6431,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		function LabelArgs:SetText(str)
 			LabelText.Text = str or "";
+			UpdateScale();
 		end;
 
 		function LabelArgs:GetText()
