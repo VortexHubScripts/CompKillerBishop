@@ -10889,11 +10889,19 @@ function Compkiller.new(Config : Window)
 			Position = "left",
 		});
 
-		-- Picker -> the Compkiller.Colors key it edits, so the Theme dropdown
-		-- can refresh every swatch to match a newly-picked preset (see
-		-- _refreshCustomColorSwatches below). Populated as each picker below
-		-- is created.
+		-- Picker -> the Compkiller.Colors key(s) it edits (a single string for
+		-- a 1:1 advanced picker, a table of strings for a basic picker that
+		-- fans out to several keys at once), so the Theme dropdown can refresh
+		-- every swatch -- basic AND advanced -- to match a newly-picked preset
+		-- or another picker's edit (see _refreshCustomColorSwatches below).
+		-- Populated as each picker below is created.
 		local _customColorPickers = {};
+
+		local function applyColors(keys, color)
+			for _, key in ipairs(keys) do
+				applyColor(key, color);
+			end;
+		end;
 
 		local AccentPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Accent",
@@ -10902,10 +10910,96 @@ function Compkiller.new(Config : Window)
 			Callback = function(color)
 				switchToCustom();
 				pcall(function() Compkiller:ChangeHighlightColor(color) end);
+				_refreshCustomColorSwatches();
 			end,
 		});
 		_customColorPickers[AccentPicker] = "Highlight";
 
+		-- Advanced Color Customization: OFF (default) shows a handful of
+		-- broad-stroke pickers that each recolor a whole group of elements at
+		-- once -- fast, hard to make look "off". ON swaps in every individual
+		-- Compkiller.Colors slot for full per-element control. Both sets stay
+		-- in sync with each other and with Theme presets, so switching modes
+		-- never shows a stale color.
+		local BasicPickers, AdvancedPickers = {}, {};
+
+		local AdvancedColorsToggle = CustomColorsSection:AddToggle({
+			Name     = "Advanced Color Customization",
+			Flag     = "UIAdvancedColors",
+			Default  = false,
+			Callback = function(v)
+				for _, picker in ipairs(BasicPickers) do
+					picker.Root.Visible = not v;
+				end;
+
+				for _, picker in ipairs(AdvancedPickers) do
+					picker.Root.Visible = v;
+				end;
+			end,
+		});
+
+		AdvancedColorsToggle.Link:AddHelper({
+			Text = "Off: a few simple colors that each affect a lot of the UI at once. On: every individual color slot, for full control.",
+		});
+
+		-- ── Basic (default) ──
+		local BackgroundGroup = { "BGDBColor", "BlockBackground", "BlockColor", "DropColor" };
+
+		local BasicBackgroundPicker = CustomColorsSection:AddColorPicker({
+			Name     = "Background",
+			Flag     = "UIColorBasicBackground",
+			Default  = Compkiller.Colors.BGDBColor,
+			Callback = function(color)
+				switchToCustom();
+				applyColors(BackgroundGroup, color);
+				_refreshCustomColorSwatches();
+			end,
+		});
+		_customColorPickers[BasicBackgroundPicker] = BackgroundGroup;
+		table.insert(BasicPickers, BasicBackgroundPicker);
+
+		local BorderGroup = { "StrokeColor", "HighStrokeColor", "LineColor" };
+
+		local BasicBordersPicker = CustomColorsSection:AddColorPicker({
+			Name     = "Borders & Dividers",
+			Flag     = "UIColorBasicBorders",
+			Default  = Compkiller.Colors.StrokeColor,
+			Callback = function(color)
+				switchToCustom();
+				applyColors(BorderGroup, color);
+				_refreshCustomColorSwatches();
+			end,
+		});
+		_customColorPickers[BasicBordersPicker] = BorderGroup;
+		table.insert(BasicPickers, BasicBordersPicker);
+
+		local BasicTextPicker = CustomColorsSection:AddColorPicker({
+			Name     = "Text",
+			Flag     = "UIColorBasicText",
+			Default  = Compkiller.Colors.SwitchColor,
+			Callback = function(color)
+				switchToCustom();
+				applyColor("SwitchColor", color);
+				_refreshCustomColorSwatches();
+			end,
+		});
+		_customColorPickers[BasicTextPicker] = "SwitchColor";
+		table.insert(BasicPickers, BasicTextPicker);
+
+		local BasicRiskyPicker = CustomColorsSection:AddColorPicker({
+			Name     = "Risky / Warning",
+			Flag     = "UIColorBasicRisky",
+			Default  = Compkiller.Colors.Risky,
+			Callback = function(color)
+				switchToCustom();
+				applyColor("Risky", color);
+				_refreshCustomColorSwatches();
+			end,
+		});
+		_customColorPickers[BasicRiskyPicker] = "Risky";
+		table.insert(BasicPickers, BasicRiskyPicker);
+
+		-- ── Advanced (every individual slot) ──
 		local BackgroundPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Background",
 			Flag     = "UIColorBackground",
@@ -10913,9 +11007,11 @@ function Compkiller.new(Config : Window)
 			Callback = function(color)
 				switchToCustom();
 				applyColor("BGDBColor", color);
+				_refreshCustomColorSwatches();
 			end,
 		});
 		_customColorPickers[BackgroundPicker] = "BGDBColor";
+		table.insert(AdvancedPickers, BackgroundPicker);
 
 		local BlockBGPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Block BG",
@@ -10924,9 +11020,11 @@ function Compkiller.new(Config : Window)
 			Callback = function(color)
 				switchToCustom();
 				applyColor("BlockBackground", color);
+				_refreshCustomColorSwatches();
 			end,
 		});
 		_customColorPickers[BlockBGPicker] = "BlockBackground";
+		table.insert(AdvancedPickers, BlockBGPicker);
 
 		local BlockPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Block",
@@ -10935,9 +11033,11 @@ function Compkiller.new(Config : Window)
 			Callback = function(color)
 				switchToCustom();
 				applyColor("BlockColor", color);
+				_refreshCustomColorSwatches();
 			end,
 		});
 		_customColorPickers[BlockPicker] = "BlockColor";
+		table.insert(AdvancedPickers, BlockPicker);
 
 		local DropdownPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Dropdown",
@@ -10946,9 +11046,11 @@ function Compkiller.new(Config : Window)
 			Callback = function(color)
 				switchToCustom();
 				applyColor("DropColor", color);
+				_refreshCustomColorSwatches();
 			end,
 		});
 		_customColorPickers[DropdownPicker] = "DropColor";
+		table.insert(AdvancedPickers, DropdownPicker);
 
 		local BorderPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Border",
@@ -10957,9 +11059,11 @@ function Compkiller.new(Config : Window)
 			Callback = function(color)
 				switchToCustom();
 				applyColor("StrokeColor", color);
+				_refreshCustomColorSwatches();
 			end,
 		});
 		_customColorPickers[BorderPicker] = "StrokeColor";
+		table.insert(AdvancedPickers, BorderPicker);
 
 		local HighBorderPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Highlight Border",
@@ -10968,9 +11072,11 @@ function Compkiller.new(Config : Window)
 			Callback = function(color)
 				switchToCustom();
 				applyColor("HighStrokeColor", color);
+				_refreshCustomColorSwatches();
 			end,
 		});
 		_customColorPickers[HighBorderPicker] = "HighStrokeColor";
+		table.insert(AdvancedPickers, HighBorderPicker);
 
 		local SeparatorPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Separator",
@@ -10979,9 +11085,27 @@ function Compkiller.new(Config : Window)
 			Callback = function(color)
 				switchToCustom();
 				applyColor("LineColor", color);
+				_refreshCustomColorSwatches();
 			end,
 		});
 		_customColorPickers[SeparatorPicker] = "LineColor";
+		table.insert(AdvancedPickers, SeparatorPicker);
+
+		-- Was captured by Saved Themes (THEME_COLOR_KEYS below) but had no
+		-- picker of its own until now -- drives hover-tint feedback across
+		-- dropdown rows, buttons, etc.
+		local HoverPicker = CustomColorsSection:AddColorPicker({
+			Name     = "Hover Highlight",
+			Flag     = "UIColorMouseEnter",
+			Default  = Compkiller.Colors.MouseEnter,
+			Callback = function(color)
+				switchToCustom();
+				Compkiller.Colors.MouseEnter = color;
+				_refreshCustomColorSwatches();
+			end,
+		});
+		_customColorPickers[HoverPicker] = "MouseEnter";
+		table.insert(AdvancedPickers, HoverPicker);
 
 		local TextPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Text",
@@ -10990,9 +11114,11 @@ function Compkiller.new(Config : Window)
 			Callback = function(color)
 				switchToCustom();
 				applyColor("SwitchColor", color);
+				_refreshCustomColorSwatches();
 			end,
 		});
 		_customColorPickers[TextPicker] = "SwitchColor";
+		table.insert(AdvancedPickers, TextPicker);
 
 		local RiskyPicker = CustomColorsSection:AddColorPicker({
 			Name     = "Risky",
@@ -11001,9 +11127,11 @@ function Compkiller.new(Config : Window)
 			Callback = function(color)
 				switchToCustom();
 				applyColor("Risky", color);
+				_refreshCustomColorSwatches();
 			end,
 		});
 		_customColorPickers[RiskyPicker] = "Risky";
+		table.insert(AdvancedPickers, RiskyPicker);
 
 		-- Toggle's ON-state pill color normally auto-derives from Accent (a
 		-- slightly darker shade) — picking one here overrides that so future
@@ -11025,19 +11153,30 @@ function Compkiller.new(Config : Window)
 						pcall(function() v.Element[v.Property] = color end);
 					end;
 				end;
+
+				_refreshCustomColorSwatches();
 			end,
 		});
 		_customColorPickers[TogglePicker] = "Toggle";
+		table.insert(AdvancedPickers, TogglePicker);
 
-		-- Called after Compkiller:SetTheme(v) so every Custom Colors swatch
-		-- shows what the newly-picked preset actually looks like — without
-		-- this, picking "Dark Blue" repainted the UI but left every swatch
-		-- showing whatever was previously selected (Default's colors, or a
-		-- stale prior custom edit), which is what made tweaking a preset feel
-		-- disconnected from what was on screen.
+		-- Basic pickers start visible, advanced hidden (matches
+		-- AdvancedColorsToggle's own Default = false above) -- both sets exist
+		-- from creation, this just sets which half is actually shown.
+		for _, picker in ipairs(AdvancedPickers) do
+			picker.Root.Visible = false;
+		end;
+
+		-- Called after Compkiller:SetTheme(v), or after any OTHER color
+		-- picker's own edit, so every Custom Colors swatch -- basic AND
+		-- advanced, shown or hidden -- always reflects the actual live
+		-- Compkiller.Colors state. Without this, picking "Dark Blue", or
+		-- editing a basic picker, left the other set showing stale colors
+		-- until you happened to open them.
 		_refreshCustomColorSwatches = function()
 			for picker, colorKey in next, _customColorPickers do
-				local color = Compkiller.Colors[colorKey];
+				local representativeKey = (typeof(colorKey) == "table") and colorKey[1] or colorKey;
+				local color = Compkiller.Colors[representativeKey];
 				if color then
 					pcall(function() picker:SetValue(color, 0, true) end);
 				end;
