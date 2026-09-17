@@ -11184,7 +11184,7 @@ function Compkiller.new(Config : Window)
 		});
 
 		local SFXToggle = ControlsSection:AddToggle({
-			Name     = "Enable Sound Effects",
+			Name     = "Sounds",
 			Flag     = "UISFXEnabled",
 			Default  = true,
 			Callback = function(v)
@@ -11192,14 +11192,14 @@ function Compkiller.new(Config : Window)
 			end,
 		});
 
-		-- Gear-icon "Sounds" option panel (same pattern as any other toggle's
-		-- nested option) for per-category mute, independent of the master
-		-- toggle above -- e.g. keep click/toggle feedback but silence
-		-- notification chimes without a global mute.
+		SFXToggle.Link:AddHelper({
+			Text = "Turns all UI sound effects on/off. Open this gear to mute individual categories instead.",
+		});
+
 		local SFXOption = SFXToggle.Link:AddOption();
 
 		SFXOption:AddToggle({
-			Name     = "Click Sounds",
+			Name     = "Click",
 			Flag     = "UISFXCategory_Click",
 			Default  = true,
 			Callback = function(v)
@@ -11208,7 +11208,7 @@ function Compkiller.new(Config : Window)
 		});
 
 		SFXOption:AddToggle({
-			Name     = "Toggle Sounds",
+			Name     = "Toggle",
 			Flag     = "UISFXCategory_ToggleOpen",
 			Default  = true,
 			Callback = function(v)
@@ -11217,7 +11217,7 @@ function Compkiller.new(Config : Window)
 		});
 
 		SFXOption:AddToggle({
-			Name     = "Notification Sounds",
+			Name     = "Notification",
 			Flag     = "UISFXCategory_Notification",
 			Default  = true,
 			Callback = function(v)
