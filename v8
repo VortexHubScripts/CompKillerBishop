@@ -4194,6 +4194,31 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			local KeyName = (typeof(Selected) == "string" and Selected) or Selected.Name;
 
+			-- Same conflict check as the section-level AddKeybind: clear any
+			-- OTHER toggle/slider auto-keybind already sitting on this exact
+			-- key, and flash red here to make the swap obvious.
+			if KeyName ~= Config.Default and Compkiller._AllAutoKeybinds then
+				for _, Other in ipairs(Compkiller._AllAutoKeybinds) do
+					if Other.Keybind == KeyName then
+						Other:LoadSettings({ Key = nil, Mode = Other.Mode });
+
+						Compkiller:_Animation(Keybind.Root, TweenInfo.new(0.1), {
+							BackgroundColor3 = Color3.fromRGB(255, 90, 90),
+							BackgroundTransparency = 0,
+						});
+
+						task.delay(0.35, function()
+							Compkiller:_Animation(Keybind.Root, TweenInfo.new(0.3), {
+								BackgroundColor3 = Compkiller.Colors.DropColor,
+								BackgroundTransparency = 0.8,
+							});
+						end);
+
+						break;
+					end;
+				end;
+			end;
+
 			Config.Default = KeyName;
 
 			Keybind.SetValue(Selected);
@@ -5529,6 +5554,34 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			end;
 
 			local KeyName = typeof(Selected) == "string" and Selected or Selected.Name;
+
+			-- Conflict check: if this exact key is already bound to a
+			-- DIFFERENT toggle/slider's auto-keybind, clear that one instead
+			-- of letting two of them silently fight over the same key, and
+			-- flash this field red so the swap is obvious. Skipped when
+			-- rebinding to the same key this field already had -- that's not
+			-- a conflict with "another" keybind, it's a no-op.
+			if KeyName ~= Config.Default and Compkiller._AllAutoKeybinds then
+				for _, Other in ipairs(Compkiller._AllAutoKeybinds) do
+					if Other.Keybind == KeyName then
+						Other:LoadSettings({ Key = nil, Mode = Other.Mode });
+
+						Compkiller:_Animation(Keybind.Root, TweenInfo.new(0.1), {
+							BackgroundColor3 = Color3.fromRGB(255, 90, 90),
+							BackgroundTransparency = 0,
+						});
+
+						task.delay(0.35, function()
+							Compkiller:_Animation(Keybind.Root, TweenInfo.new(0.3), {
+								BackgroundColor3 = Compkiller.Colors.DropColor,
+								BackgroundTransparency = 0.8,
+							});
+						end);
+
+						break;
+					end;
+				end;
+			end;
 
 			Config.Default = KeyName;
 
@@ -11374,6 +11427,15 @@ function Compkiller.new(Config : Window)
 			Default  = false,
 			Callback = function(v)
 				Compkiller.HideKeybindsUI = v;
+
+				-- Lets DrawKeybindManager (and anything else that cares) react
+				-- immediately instead of only picking this up on its next
+				-- manual Refresh.
+				if Compkiller._HideKeybindsUIListeners then
+					for _, Listener in ipairs(Compkiller._HideKeybindsUIListeners) do
+						pcall(Listener);
+					end;
+				end;
 			end,
 		});
 
@@ -12817,20 +12879,36 @@ function Compkiller.new(Config : Window)
 		BuildRows = function()
 			ClearRows();
 
-			local List = Compkiller._AllAutoKeybinds or {};
+			-- Only enabled to be seen while the player has "Hide Keybinds UI"
+			-- turned OFF -- if they've hidden that UI, don't show a second
+			-- keybind surface here either.
+			if Compkiller.HideKeybindsUI then
+				table.insert(RowHolders, ListSection:AddLabel({
+					Name = "Hidden while \"Hide Keybinds UI\" is enabled in UI Settings \226\134\146 Controls.",
+				}));
+				return;
+			end;
 
-			-- Count how many entries currently share each bound key.
-			local KeyCounts = {};
-			for _, AutoKeybind in ipairs(List) do
+			-- Only currently-BOUND entries -- an unbound toggle isn't a
+			-- keybind worth listing here.
+			local Bound = {};
+			for _, AutoKeybind in ipairs(Compkiller._AllAutoKeybinds or {}) do
 				local Settings = AutoKeybind:GetSettings();
 				if Settings.Key then
-					KeyCounts[Settings.Key] = (KeyCounts[Settings.Key] or 0) + 1;
+					table.insert(Bound, AutoKeybind);
 				end;
 			end;
 
-			if #List == 0 then
-				table.insert(RowHolders, ListSection:AddLabel({ Name = "No keybinds set yet." }));
+			if #Bound == 0 then
+				table.insert(RowHolders, ListSection:AddLabel({ Name = "No keys currently bound." }));
 				return;
+			end;
+
+			-- Count how many bound entries currently share each key.
+			local KeyCounts = {};
+			for _, AutoKeybind in ipairs(Bound) do
+				local Settings = AutoKeybind:GetSettings();
+				KeyCounts[Settings.Key] = (KeyCounts[Settings.Key] or 0) + 1;
 			end;
 
 			local HasConflicts = false;
@@ -12844,14 +12922,13 @@ function Compkiller.new(Config : Window)
 				}));
 			end;
 
-			for _, AutoKeybind in ipairs(List) do
+			for _, AutoKeybind in ipairs(Bound) do
 				local Settings = AutoKeybind:GetSettings();
-				local KeyText = Settings.Key and tostring(Settings.Key) or "Unbound";
 				local ModeText = (Settings.Mode == 2) and "Toggle" or "Hold";
-				local IsConflict = Settings.Key and KeyCounts[Settings.Key] > 1;
+				local IsConflict = KeyCounts[Settings.Key] > 1;
 				local DisplayName = AutoKeybind.Name or "Unnamed";
 
-				local RowText = string.format("%s  \226\128\148  %s (%s)", DisplayName, KeyText, ModeText);
+				local RowText = string.format("%s  \226\128\148  %s (%s)", DisplayName, tostring(Settings.Key), ModeText);
 
 				if IsConflict then
 					RowText = "<font color=\"#FF6B6B\">" .. RowText .. "</font>";
@@ -12865,6 +12942,17 @@ function Compkiller.new(Config : Window)
 						local KeyName = CaptureKey();
 
 						if KeyName then
+							-- Same conflict rule as every other keybind field: clear
+							-- whichever OTHER entry already holds this key instead of
+							-- letting two of them end up bound to the same one. The
+							-- list rebuild below (Bound-only + red conflict tint)
+							-- reflects the swap immediately.
+							for _, Other in ipairs(Compkiller._AllAutoKeybinds or {}) do
+								if Other ~= AutoKeybind and Other.Keybind == KeyName then
+									Other:LoadSettings({ Key = nil, Mode = Other.Mode });
+								end;
+							end;
+
 							local Current = AutoKeybind:GetSettings();
 							AutoKeybind:LoadSettings({ Key = KeyName, Mode = Current.Mode });
 							BuildRows();
@@ -12882,6 +12970,13 @@ function Compkiller.new(Config : Window)
 				}));
 			end;
 		end;
+
+		-- React immediately when "Hide Keybinds UI" changes anywhere in the
+		-- window, not just on the next manual Refresh.
+		Compkiller._HideKeybindsUIListeners = Compkiller._HideKeybindsUIListeners or {};
+		table.insert(Compkiller._HideKeybindsUIListeners, function()
+			if BuildRows then BuildRows(); end;
+		end);
 
 		BuildRows();
 
