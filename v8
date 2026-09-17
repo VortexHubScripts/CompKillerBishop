@@ -406,6 +406,15 @@ local Compkiller = {
 		ToggleOpen   = "rbxassetid://9120093415",
 		Notification = "rbxassetid://120024000243640",
 	},
+	-- Per-category mute, independent of the master SFXEnabled toggle -- e.g.
+	-- keep click/toggle feedback on but silence notification chimes. Keyed by
+	-- the same names as SFXAssets; missing/nil entries default to on (checked
+	-- with `== false`, same "nil == on" convention as SFXEnabled).
+	SFXCategoryEnabled = {
+		Click        = true,
+		ToggleOpen   = true,
+		Notification = true,
+	},
 };
 
 Compkiller.Colors = {
@@ -1539,6 +1548,9 @@ end;
 -- SoundId swapped mid-playback, etc).
 function Compkiller:PlaySFX(name: string, volumeMul: number?)
 	if Compkiller.SFXEnabled == false then return; end;
+
+	local CategoryEnabled = Compkiller.SFXCategoryEnabled and Compkiller.SFXCategoryEnabled[name];
+	if CategoryEnabled == false then return; end;
 
 	local id = Compkiller.SFXAssets and Compkiller.SFXAssets[name];
 
@@ -11175,6 +11187,35 @@ function Compkiller.new(Config : Window)
 			Name     = "Enable Sound Effects",
 			Flag     = "UISFXEnabled",
 			Default  = true,
+			-- Sub-toggles: per-category mute that only shows up while the master
+			-- toggle above is on, so you can e.g. keep click/toggle feedback but
+			-- silence notification chimes without a global mute.
+			Toggles  = {
+				{
+					Name     = "Click Sounds",
+					Flag     = "UISFXCategory_Click",
+					Default  = true,
+					Callback = function(v)
+						Compkiller.SFXCategoryEnabled.Click = v;
+					end,
+				},
+				{
+					Name     = "Toggle Sounds",
+					Flag     = "UISFXCategory_ToggleOpen",
+					Default  = true,
+					Callback = function(v)
+						Compkiller.SFXCategoryEnabled.ToggleOpen = v;
+					end,
+				},
+				{
+					Name     = "Notification Sounds",
+					Flag     = "UISFXCategory_Notification",
+					Default  = true,
+					Callback = function(v)
+						Compkiller.SFXCategoryEnabled.Notification = v;
+					end,
+				},
+			},
 			Callback = function(v)
 				Compkiller.SFXEnabled = v;
 			end,
