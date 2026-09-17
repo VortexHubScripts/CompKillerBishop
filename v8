@@ -137,6 +137,7 @@ export type Toggle = {
 	Flag: string | nil,
 	Risky: boolean,
 	Toggles: {Toggle} | nil,
+	DependsOn: string | nil,
 	Callback: (Value: boolean) -> any?
 };
 
@@ -152,6 +153,7 @@ export type TextBoxConfig = {
 	Placeholder: string,
 	Flag: string | nil,
 	Numeric: boolean,
+	DependsOn: string | nil,
 	Callback: (Text: string) -> any?
 };
 
@@ -160,6 +162,7 @@ export type ColorPicker = {
 	Default: Color3,
 	Flag: string | nil,
 	Transparency: number,
+	DependsOn: string | nil,
 	Callback: (Value: Color3 , Trans: number) -> any?
 };
 
@@ -178,6 +181,7 @@ export type Slider = {
 	Type: string,
 	Round: number,
 	Increment: number,
+	DependsOn: string | nil,
 	Callback: (Value: number) -> any?
 };
 
@@ -187,11 +191,13 @@ export type Dropdown = {
 	Values: {string},
 	Multi: boolean,
 	Refresh: ((CurrentDefault: string | {string}) -> ({string}, (string | {string})?)) | nil,
+	DependsOn: string | nil,
 	Callback: (Value: string | {[string]: boolean}) -> any?
 };
 
 export type Button = {
 	Name: string,
+	DependsOn: string | nil,
 	Callback: () -> any?
 };
 
@@ -199,7 +205,8 @@ export type Keybind = {
 	Name: string,
 	Default: string | Enum.KeyCode,
 	Callback: (Value: string) -> any,
-	Blacklist: {string | Enum.KeyCode}
+	Blacklist: {string | Enum.KeyCode},
+	DependsOn: string | nil,
 };
 
 export type MiniKeybind = {
@@ -214,12 +221,14 @@ export type Helper = {
 
 export type Paragraph = {
 	Title: string,
-	Content: string
+	Content: string,
+	DependsOn: string | nil,
 }
 
 export type Label = {
 	Name: string,
 	Flag: string | nil,
+	DependsOn: string | nil,
 }
 
 pcall(function() -- for Luraph
@@ -4101,6 +4110,13 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 		end,
 	});
 
+	-- Registered globally so Window:DrawKeybindManager can enumerate every
+	-- bound key across the whole script (conflict detection, rebind/clear
+	-- from one master list) without each toggle/slider needing to know that
+	-- feature exists.
+	Compkiller._AllAutoKeybinds = Compkiller._AllAutoKeybinds or {};
+	table.insert(Compkiller._AllAutoKeybinds, APIRef);
+
 	return APIRef;
 end;
 
@@ -5046,10 +5062,53 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any ,
 	return Args;
 end;
 
--- Names to watch for the Ctrl+K global search. Wraps each Add* method on a
--- Section's returned Args table (see TabArgs:DrawSection) so every element it
--- creates registers itself in the window's search index using the same
--- Config.Name the caller already passed in — no per-element instrumentation.
+-- Conditional Dependency Chains: any element (not just nested sub-toggles)
+-- can be shown/hidden based on a TOGGLE's boolean flag elsewhere in the
+-- window, via Config.DependsOn = "SomeToggleFlag". This is a general-purpose
+-- extension of AddToggle's Toggles = {...} sub-toggle mechanism (which stays
+-- as-is for the common "nest toggles under a toggle" case and doesn't need a
+-- Flag at all) — DependsOn instead works across ANY element type/section by
+-- going through the toggle's Flag rather than a direct closure reference.
+--
+-- _FlagDependents[FlagName] is a list of dependent Args tables (anything
+-- with a .Root Frame). _NotifyDependents is called from AddToggle's click
+-- handler and :SetValue whenever a flagged toggle's value actually changes.
+Compkiller._FlagDependents = Compkiller._FlagDependents or {};
+
+function Compkiller:_RegisterDependency(FlagName: string, DependentArgs)
+	if not DependentArgs or not DependentArgs.Root then return; end;
+
+	Compkiller._FlagDependents[FlagName] = Compkiller._FlagDependents[FlagName] or {};
+	table.insert(Compkiller._FlagDependents[FlagName], DependentArgs);
+
+	-- Apply the source toggle's CURRENT value immediately, so it doesn't
+	-- matter whether DependsOn is set on an element created before or after
+	-- the toggle it depends on. If the toggle doesn't exist yet, the
+	-- dependent just stays at its default Visible = true until the toggle
+	-- is created AND actually changes value at least once.
+	local SourceFlag = Compkiller.Flags[FlagName];
+
+	if SourceFlag and SourceFlag.GetValue then
+		DependentArgs.Root.Visible = SourceFlag:GetValue() and true or false;
+	end;
+end;
+
+function Compkiller:_NotifyDependents(FlagName: string, Value: boolean)
+	local List = Compkiller._FlagDependents[FlagName];
+
+	if not List then return; end;
+
+	for _, DependentArgs in ipairs(List) do
+		if DependentArgs.Root then
+			DependentArgs.Root.Visible = Value and true or false;
+		end;
+	end;
+end;
+
+-- Names to watch for the Ctrl+K global search AND for Conditional Dependency
+-- Chains (Config.DependsOn) — every element type gets both for free by
+-- wrapping the same Add* methods once here, rather than instrumenting each
+-- Add* method body individually.
 Compkiller._SEARCHABLE_METHODS = {
 	"AddToggle", "AddSlider", "AddButton", "AddKeybind", "AddColorPicker",
 	"AddDropdown", "AddTextBox", "AddLabel", "AddParagraph"
@@ -5070,6 +5129,10 @@ function Compkiller:_WrapSectionSearch(WindowArgs, Args, TabName, SectionName, S
 				end;
 
 				local Result = Original(self, Config, ...);
+
+				if Config and Config.DependsOn and Result then
+					Compkiller:_RegisterDependency(Config.DependsOn, Result);
+				end;
 
 				local ElementFrame = SectionFrame;
 				for _, Child in ipairs(SectionFrame:GetChildren()) do
@@ -5304,6 +5367,10 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			ApplySubToggles(Config.Default);
 
+			if Config.Flag then
+				Compkiller:_NotifyDependents(Config.Flag, Config.Default);
+			end;
+
 			-- Softer/quieter for switching off vs. on, so the two states are
 			-- distinguishable by ear without needing two separate sound assets.
 			Compkiller:PlaySFX("ToggleOpen", Config.Default and 1 or 0.6);
@@ -5324,6 +5391,10 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			Block:SetTransparency((Config.Default and 0.1) or 0.3);
 
 			ApplySubToggles(Config.Default);
+
+			if Config.Flag then
+				Compkiller:_NotifyDependents(Config.Flag, Config.Default);
+			end;
 
 			if Config.Callback then task.spawn(Config.Callback, Config.Default); end;
 		end;
@@ -5469,6 +5540,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		local Args = {};
 
 		Args.Flag = Config.Flag;
+		Args.Root = Block.Root;
 
 		function Args:SetText(str : string)
 			Block:SetText(str or Config.Name);
@@ -5542,6 +5614,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		local Args = {};
 
 		Args.Flag = Config.Flag;
+		Args.Root = Block.Root;
 
 		-- Silent (3rd arg): update the displayed swatch/hex without firing
 		-- Config.Callback — used by the UI Settings theme dropdown to refresh
@@ -5723,6 +5796,8 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		end;
 
 		local Args = {};
+
+		Args.Root = Button;
 
 		Args.Signal = Signal:Connect(function(bool)
 			if bool then
@@ -6063,6 +6138,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		local Args = {};
 
 		Args.Flag = Config.Flag;
+		Args.Root = Slider;
 
 		function Args:SetValue(Value)
 			Config.Default = Value;
@@ -6299,6 +6375,8 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		local Args = {};
 
+		Args.Root = Paragraph;
+
 		function Args:SetTitle(title)
 			BlockText.Text = title;
 			UpdateScale();
@@ -6440,6 +6518,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		local LabelArgs = {};
 
 		LabelArgs.Flag = Config.Flag;
+		LabelArgs.Root = Label;
 
 		function LabelArgs:SetText(str)
 			LabelText.Text = str or "";
@@ -6671,6 +6750,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		local Args = {};
 
 		Args.Flag = Config.Flag;
+		Args.Root = TextBox;
 
 		function Args:SetText(str : string)
 			BlockText.Text = str or Config.Name
@@ -6980,6 +7060,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		local Args = {};
 
 		Args.Flag = Config.Flag;
+		Args.Root = Dropdown;
 
 		function Args:SetValue(Value)
 			Config.Default = Value;
@@ -12661,6 +12742,150 @@ function Compkiller.new(Config : Window)
 	-- dedicated "UI Settings" tab (DrawUISettings) is the only settings surface now.
 	function WindowArgs:DrawSettings()
 		return WindowArgs._SettingsAPI;
+	end;
+
+	-- Keybind Conflict Resolver / Global Bind Inspector: a dedicated tab
+	-- listing every toggle/slider auto-keybind in the script (see
+	-- Compkiller._AllAutoKeybinds, populated by _KeybindHandler) in one
+	-- place, flags any key bound to more than one of them, and lets you
+	-- rebind or clear each entry without hunting down the individual
+	-- toggle. Built entirely on the public Section:AddLabel/AddButton API
+	-- and each entry's own AutoKeybind:GetSettings()/:LoadSettings()
+	-- contract — no internal keybind-handling changes needed.
+	function WindowArgs:DrawKeybindManager(Configuration)
+		Configuration = Compkiller.__CONFIG(Configuration, {
+			Name = "Keybinds",
+			Icon = "keyboard",
+		});
+
+		local KBTab = WindowArgs:DrawTab({
+			Name = Configuration.Name,
+			Icon = Configuration.Icon,
+			Type = "Single",
+			EnableScrolling = true,
+		});
+
+		local ListSection = KBTab:DrawSection({ Name = "Bound Keys" });
+
+		local BuildRows;
+
+		ListSection:AddButton({
+			Name = "Refresh List",
+			Callback = function()
+				if BuildRows then BuildRows(); end;
+			end,
+		});
+
+		-- Only rows built by BuildRows go here -- the Refresh button above is
+		-- persistent and never torn down between rebuilds.
+		local RowHolders = {};
+
+		local function ClearRows()
+			for _, Holder in ipairs(RowHolders) do
+				if Holder.Root then
+					pcall(function() Holder.Root:Destroy(); end);
+				end;
+			end;
+
+			table.clear(RowHolders);
+		end;
+
+		-- Raw capture loop, same shape as every other keybind field in the
+		-- library (AddKeybind, the right-click popover's Change Key, etc).
+		local function CaptureKey()
+			local Selected, Cancelled = nil, false;
+
+			while not Selected and not Cancelled do
+				local Key = UserInputService.InputBegan:Wait();
+
+				if Key.KeyCode == Enum.KeyCode.Escape then
+					Cancelled = true;
+				elseif Key.KeyCode ~= Enum.KeyCode.Unknown then
+					Selected = Key.KeyCode;
+				elseif Key.UserInputType == Enum.UserInputType.MouseButton1 then
+					Selected = "MouseLeft";
+				elseif Key.UserInputType == Enum.UserInputType.MouseButton2 then
+					Selected = "MouseRight";
+				end;
+			end;
+
+			if Cancelled then return nil; end;
+
+			return (typeof(Selected) == "string" and Selected) or Selected.Name;
+		end;
+
+		BuildRows = function()
+			ClearRows();
+
+			local List = Compkiller._AllAutoKeybinds or {};
+
+			-- Count how many entries currently share each bound key.
+			local KeyCounts = {};
+			for _, AutoKeybind in ipairs(List) do
+				local Settings = AutoKeybind:GetSettings();
+				if Settings.Key then
+					KeyCounts[Settings.Key] = (KeyCounts[Settings.Key] or 0) + 1;
+				end;
+			end;
+
+			if #List == 0 then
+				table.insert(RowHolders, ListSection:AddLabel({ Name = "No keybinds set yet." }));
+				return;
+			end;
+
+			local HasConflicts = false;
+			for _, Count in pairs(KeyCounts) do
+				if Count > 1 then HasConflicts = true; break; end;
+			end;
+
+			if HasConflicts then
+				table.insert(RowHolders, ListSection:AddLabel({
+					Name = "<font color=\"#FFC430\">\226\154\160 Some keys below are bound to more than one toggle.</font>",
+				}));
+			end;
+
+			for _, AutoKeybind in ipairs(List) do
+				local Settings = AutoKeybind:GetSettings();
+				local KeyText = Settings.Key and tostring(Settings.Key) or "Unbound";
+				local ModeText = (Settings.Mode == 2) and "Toggle" or "Hold";
+				local IsConflict = Settings.Key and KeyCounts[Settings.Key] > 1;
+				local DisplayName = AutoKeybind.Name or "Unnamed";
+
+				local RowText = string.format("%s  \226\128\148  %s (%s)", DisplayName, KeyText, ModeText);
+
+				if IsConflict then
+					RowText = "<font color=\"#FF6B6B\">" .. RowText .. "</font>";
+				end;
+
+				table.insert(RowHolders, ListSection:AddLabel({ Name = RowText }));
+
+				table.insert(RowHolders, ListSection:AddButton({
+					Name = "Rebind: " .. DisplayName,
+					Callback = function()
+						local KeyName = CaptureKey();
+
+						if KeyName then
+							local Current = AutoKeybind:GetSettings();
+							AutoKeybind:LoadSettings({ Key = KeyName, Mode = Current.Mode });
+							BuildRows();
+						end;
+					end,
+				}));
+
+				table.insert(RowHolders, ListSection:AddButton({
+					Name = "Clear: " .. DisplayName,
+					Callback = function()
+						local Current = AutoKeybind:GetSettings();
+						AutoKeybind:LoadSettings({ Key = nil, Mode = Current.Mode });
+						BuildRows();
+					end,
+				}));
+			end;
+		end;
+
+		BuildRows();
+
+		return { Refresh = BuildRows };
 	end;
 
 	function WindowArgs:Update(config: WindowUpdate)
