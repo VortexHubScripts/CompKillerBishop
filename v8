@@ -439,6 +439,11 @@ Compkiller.Colors = {
 	BlockBackground = Color3.fromRGB(24, 17, 34),     -- section panels — purple-tinted, distinct layer
 	LineColor       = Color3.fromRGB(40, 28, 58),     -- dividers — purple-tinted instead of neutral gray
 	HighStrokeColor = Color3.fromRGB(58, 40, 84),     -- panel outlines — visible depth
+	-- Advanced-only slot, independent of SwitchColor: the dropdown's selected-
+	-- value text and its open option-list text. Not part of the preset color
+	-- tables (added after them) -- Compkiller:SetTheme fills this in from the
+	-- picked preset's own SwitchColor if a preset doesn't define it.
+	DropdownTextColor = Color3.fromRGB(222, 210, 235),
 };
 
 Compkiller.Elements = {
@@ -454,7 +459,16 @@ Compkiller.Elements = {
 	LineColor = {},
 	HighStrokeColor = {},
 	Toggle = {},
+	DropdownTextColor = {},
 };
+
+-- Window background transparency/image: advanced UI Settings options. Kept
+-- separate from Compkiller.Colors (these aren't colors) and applied by
+-- Compkiller.new() itself, not a per-element retheme group -- there's only
+-- ever one main window background to touch.
+Compkiller.WindowBackgroundTransparency = 0;
+Compkiller.WindowBackgroundImage = "";
+Compkiller.WindowBackgroundImageTransparency = 0.85;
 
 Compkiller.DragBlacklist = {};
 Compkiller.IaDrag = false;
@@ -3043,12 +3057,14 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 	});
 
 	TextLabel.Parent = HexFrame
-	TextLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+	TextLabel.AnchorPoint = Vector2.new(0, 0.5)
 	TextLabel.BackgroundTransparency = 1.000
 	TextLabel.BorderColor3 = Color3.fromRGB(0, 0, 0)
 	TextLabel.BorderSizePixel = 0
-	TextLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
-	TextLabel.Size = UDim2.new(1, -10, 1, -5)
+	-- Left-aligned and shrunk from full-width to leave room for the
+	-- eyedropper button on the right (was centered, Size 1,-10 -- full width).
+	TextLabel.Position = UDim2.new(0, 8, 0.5, 0)
+	TextLabel.Size = UDim2.new(1, -32, 1, -5)
 	TextLabel.ZIndex = BaseZ_Index + 206
 	TextLabel.Font = Enum.Font.Gotham
 	TextLabel.Text = "#FFFFFFF"
@@ -3061,6 +3077,33 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		Element = TextLabel,
 		Property = 'TextColor3'
 	});
+
+	-- Eyedropper: click, then click any BasePart in the 3D world to sample
+	-- its Color and jump straight to it -- same idea as the hex box, just
+	-- sourced from a world part instead of typed text.
+	local EyedropperButton = Instance.new("ImageButton")
+	EyedropperButton.Name = Compkiller:_RandomString()
+	EyedropperButton.Parent = HexFrame
+	EyedropperButton.AnchorPoint = Vector2.new(1, 0.5)
+	EyedropperButton.BackgroundTransparency = 1
+	EyedropperButton.BorderSizePixel = 0
+	EyedropperButton.Position = UDim2.new(1, -6, 0.5, 0)
+	EyedropperButton.Size = UDim2.new(0, 15, 0, 15)
+	EyedropperButton.ZIndex = BaseZ_Index + 206
+	EyedropperButton.Image = Compkiller:_GetIcon("pipette")
+	EyedropperButton.ImageColor3 = Compkiller.Colors.SwitchColor
+	EyedropperButton.ScaleType = Enum.ScaleType.Fit
+
+	table.insert(Compkiller.Elements.SwitchColor, {
+		Element = EyedropperButton,
+		Property = 'ImageColor3'
+	});
+
+	Compkiller:_Hover(EyedropperButton, function()
+		Compkiller:_Animation(EyedropperButton, TweenInfo.new(0.15), { ImageTransparency = 0.25 });
+	end, function()
+		Compkiller:_Animation(EyedropperButton, TweenInfo.new(0.15), { ImageTransparency = 0 });
+	end);
 
 	local Args = {
 		IsHold = false,
@@ -3384,6 +3427,61 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		-- on invalid input, instead of leaving a bad string sitting in the box.
 		Args:Update();
 	end);
+
+	-- Eyedropper: arms a one-shot listener for the next left-click anywhere
+	-- in the game and samples whatever BasePart was under the cursor. A
+	-- transient, user-initiated connection (armed on click, torn down after
+	-- exactly one use or Escape) rather than a permanent per-picker listener,
+	-- so this doesn't need routing through the shared input dispatchers the
+	-- rest of the library uses for always-on per-element connections.
+	do
+		local IsSampling = false;
+
+		EyedropperButton.MouseButton1Click:Connect(function()
+			if IsSampling then return; end;
+
+			IsSampling = true;
+
+			local PulseTween = Compkiller:_Animation(EyedropperButton, TweenInfo.new(0.45, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+				ImageTransparency = 0.65
+			});
+
+			local InputConn;
+
+			local function StopSampling()
+				IsSampling = false;
+				PulseTween:Cancel();
+				EyedropperButton.ImageTransparency = 0;
+				if InputConn then InputConn:Disconnect(); end;
+			end;
+
+			InputConn = UserInputService.InputBegan:Connect(function(Input, GameProcessed)
+				if Input.KeyCode == Enum.KeyCode.Escape then
+					StopSampling();
+					return;
+				end;
+
+				if Input.UserInputType ~= Enum.UserInputType.MouseButton1 then return; end;
+
+				-- A click any other GUI element (a button elsewhere in the
+				-- panel, another picker, etc) absorbs first and sets this --
+				-- ignore it so sampling doesn't fire alongside whatever that
+				-- element's own click does, and keep it armed for the actual
+				-- world click. Also skips this picker's own panel explicitly,
+				-- since not everything on it necessarily sets Input.Handled.
+				if GameProcessed or Compkiller:_IsMouseOverFrame(ColorPickerWindow) then return; end;
+
+				local Target = Mouse.Target;
+
+				StopSampling();
+
+				if Target and Target:IsA("BasePart") then
+					H, S, V = Target.Color:ToHSV();
+					Args:Update();
+				end;
+			end);
+		end);
+	end;
 
 	table.insert(Compkiller._OutsideClickWatchers, function()
 		if not Compkiller:_IsMouseOverFrame(ColorPickerWindow) then
@@ -4873,12 +4971,12 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any ,
 		BlockText.ZIndex = BaseZ_Index + 6
 		BlockText.Font = Enum.Font.GothamMedium
 		BlockText.Text = ""
-		BlockText.TextColor3 = Compkiller.Colors.SwitchColor
+		BlockText.TextColor3 = Compkiller.Colors.DropdownTextColor
 		BlockText.TextSize = 13.000
 		BlockText.TextTransparency = 0.500
 		BlockText.TextXAlignment = Enum.TextXAlignment.Left
 
-		table.insert(Compkiller.Elements.SwitchColor , {
+		table.insert(Compkiller.Elements.DropdownTextColor , {
 			Element = BlockText,
 			Property = 'TextColor3'
 		});
@@ -7047,11 +7145,11 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		ValueText.ZIndex = Zindex + 8
 		ValueText.Font = Enum.Font.Gotham
 		ValueText.Text = DaTabarser(Config.Default)
-		ValueText.TextColor3 = Compkiller.Colors.SwitchColor
+		ValueText.TextColor3 = Compkiller.Colors.DropdownTextColor
 		ValueText.TextSize = 11.000
 		ValueText.TextXAlignment = Enum.TextXAlignment.Left
 
-		table.insert(Compkiller.Elements.SwitchColor , {
+		table.insert(Compkiller.Elements.DropdownTextColor , {
 			Element = ValueText,
 			Property = 'TextColor3'
 		});
@@ -7369,6 +7467,13 @@ function Compkiller:SetTheme(name)
 		}
 	end;
 
+	-- Presets above replace Compkiller.Colors wholesale and predate this slot,
+	-- so it's always nil right after a preset switch -- fall back to that
+	-- preset's own SwitchColor so dropdown text never goes nil/invisible.
+	-- Same tradeoff every other advanced color already has: switching to a
+	-- named preset resets anything not defined by it.
+	Compkiller.Colors.DropdownTextColor = Compkiller.Colors.DropdownTextColor or Compkiller.Colors.SwitchColor;
+
 	Compkiller:RefreshCurrentColor()
 end;
 
@@ -7376,6 +7481,12 @@ function Compkiller:RefreshCurrentColor()
 	for i,v in next , Compkiller.Elements.Highlight do
 		if v.Element and v.Property then
 			v.Element[v.Property] = Compkiller.Colors.Highlight;
+		end;
+	end;
+
+	for i,v in next , Compkiller.Elements.DropdownTextColor do
+		if v.Element and v.Property then
+			v.Element[v.Property] = Compkiller.Colors.DropdownTextColor;
 		end;
 	end;
 
@@ -7910,14 +8021,48 @@ function Compkiller.new(Config : Window)
 	TabMainFrame.Size = UDim2.new(1, 0, 1, 0)
 	TabMainFrame.ZIndex = 5
 
+	-- Optional custom background image (UI Settings -> Custom Colors ->
+	-- Advanced), sat behind every real tab's content (all of which use
+	-- higher ZIndex values, e.g. TabContent's Left/Right at 8) but inside
+	-- TabMainFrame so it never bleeds into the tab sidebar strip. Created
+	-- once here and mutated later via Compkiller.WindowBackgroundImage/
+	-- WindowBackgroundImageTransparency rather than a per-picker element.
+	local BGImageLabel = Instance.new("ImageLabel")
+	BGImageLabel.Name = Compkiller:_RandomString()
+	BGImageLabel.Parent = TabMainFrame
+	BGImageLabel.BackgroundTransparency = 1
+	BGImageLabel.BorderSizePixel = 0
+	BGImageLabel.Size = UDim2.new(1, 0, 1, 0)
+	BGImageLabel.ZIndex = TabMainFrame.ZIndex
+	BGImageLabel.ScaleType = Enum.ScaleType.Crop
+	BGImageLabel.Image = (Compkiller.WindowBackgroundImage ~= "" and Compkiller:CacheImage(Compkiller.WindowBackgroundImage)) or "";
+	BGImageLabel.ImageTransparency = Compkiller.WindowBackgroundImageTransparency;
+
+	-- nil for either argument means "leave it as-is" -- callers only ever
+	-- pass one real value at a time (the image textbox vs. the transparency
+	-- slider), so `assetId or ""` here would wipe the image every time only
+	-- the transparency changed.
+	WindowArgs._SetBackgroundImage = function(assetId, transparency)
+		if assetId ~= nil then
+			Compkiller.WindowBackgroundImage = assetId;
+		end;
+
+		if transparency ~= nil then
+			Compkiller.WindowBackgroundImageTransparency = transparency;
+		end;
+
+		BGImageLabel.Image = (Compkiller.WindowBackgroundImage ~= "" and Compkiller:CacheImage(Compkiller.WindowBackgroundImage)) or "";
+		BGImageLabel.ImageTransparency = Compkiller.WindowBackgroundImageTransparency;
+	end;
+
 	if Compkiller:_IsMobile() then
 		Compkiller:_AddDragBlacklist(TabButtons);
 	end;
 
 	WindowOpen:Connect(function(v)
 		if WindowArgs.PerformanceMode then
-			MainFrame.BackgroundTransparency = (v and 0) or 1;
-			return;	
+			MainFrame.BackgroundTransparency = (v and Compkiller.WindowBackgroundTransparency) or 1;
+			return;
 		end;
 
 		if v then
@@ -7950,7 +8095,7 @@ function Compkiller.new(Config : Window)
 			})
 
 			Compkiller:_Animation(MainFrame,TweenInfo.new(0.2),{
-				BackgroundTransparency = 0
+				BackgroundTransparency = Compkiller.WindowBackgroundTransparency
 			})
 
 			Compkiller:_Animation(LineFrame1,TweenInfo.new(0.3),{
@@ -10903,24 +11048,13 @@ function Compkiller.new(Config : Window)
 			end;
 		end;
 
-		local AccentPicker = CustomColorsSection:AddColorPicker({
-			Name     = "Accent",
-			Flag     = "UIColorAccent",
-			Default  = Compkiller.Colors.Highlight,
-			Callback = function(color)
-				switchToCustom();
-				pcall(function() Compkiller:ChangeHighlightColor(color) end);
-				_refreshCustomColorSwatches();
-			end,
-		});
-		_customColorPickers[AccentPicker] = "Highlight";
-
 		-- Advanced Color Customization: OFF (default) shows a handful of
 		-- broad-stroke pickers that each recolor a whole group of elements at
 		-- once -- fast, hard to make look "off". ON swaps in every individual
 		-- Compkiller.Colors slot for full per-element control. Both sets stay
 		-- in sync with each other and with Theme presets, so switching modes
-		-- never shows a stale color.
+		-- never shows a stale color. Placed above Accent since it governs
+		-- everything else in this section.
 		local BasicPickers, AdvancedPickers = {}, {};
 
 		local AdvancedColorsToggle = CustomColorsSection:AddToggle({
@@ -10941,6 +11075,18 @@ function Compkiller.new(Config : Window)
 		AdvancedColorsToggle.Link:AddHelper({
 			Text = "Off: a few simple colors that each affect a lot of the UI at once. On: every individual color slot, for full control.",
 		});
+
+		local AccentPicker = CustomColorsSection:AddColorPicker({
+			Name     = "Accent",
+			Flag     = "UIColorAccent",
+			Default  = Compkiller.Colors.Highlight,
+			Callback = function(color)
+				switchToCustom();
+				pcall(function() Compkiller:ChangeHighlightColor(color) end);
+				_refreshCustomColorSwatches();
+			end,
+		});
+		_customColorPickers[AccentPicker] = "Highlight";
 
 		-- ── Basic (default) ──
 		local BackgroundGroup = { "BGDBColor", "BlockBackground", "BlockColor", "DropColor" };
@@ -11159,6 +11305,83 @@ function Compkiller.new(Config : Window)
 		});
 		_customColorPickers[TogglePicker] = "Toggle";
 		table.insert(AdvancedPickers, TogglePicker);
+
+		-- Independent of SwitchColor: the dropdown's selected-value text and
+		-- its open option-list text. Not saved by Saved Themes' preset tables
+		-- (added after them) -- SetTheme falls back to that preset's own
+		-- SwitchColor whenever this isn't defined, same as every preset switch
+		-- already resets any other un-customized advanced color.
+		local DropdownTextPicker = CustomColorsSection:AddColorPicker({
+			Name     = "Dropdown Text",
+			Flag     = "UIColorDropdownText",
+			Default  = Compkiller.Colors.DropdownTextColor,
+			Callback = function(color)
+				switchToCustom();
+				applyColor("DropdownTextColor", color);
+				_refreshCustomColorSwatches();
+			end,
+		});
+		_customColorPickers[DropdownTextPicker] = "DropdownTextColor";
+		table.insert(AdvancedPickers, DropdownTextPicker);
+
+		-- Window Background Transparency: how see-through the whole window
+		-- panel is while open. NOT the same property the Insert/toggle
+		-- keybind uses to hide the window (that still goes to fully opaque-1,
+		-- unaffected) -- this only changes what "open" looks like. Clamped to
+		-- 85% so it can never cross into that hidden threshold by accident.
+		local WindowTransparencySlider = CustomColorsSection:AddSlider({
+			Name     = "Window Background Transparency",
+			Flag     = "UIWindowBGTransparency",
+			Min      = 0,
+			Max      = 85,
+			Default  = Compkiller.WindowBackgroundTransparency * 100,
+			Type     = " %",
+			Round    = 0,
+			Callback = function(v)
+				switchToCustom();
+				Compkiller.WindowBackgroundTransparency = v / 100;
+
+				-- Apply immediately if the window is currently open -- the
+				-- value is otherwise only read the next time it's toggled.
+				if WindowOpen:GetValue() and not WindowArgs.PerformanceMode then
+					Compkiller:_Animation(MainFrame, TweenInfo.new(0.15), {
+						BackgroundTransparency = Compkiller.WindowBackgroundTransparency
+					});
+				end;
+			end,
+		});
+		table.insert(AdvancedPickers, WindowTransparencySlider);
+
+		-- Window Background Image: an optional custom image/texture behind
+		-- every tab's content (never over the tab sidebar strip). Paste any
+		-- asset id you're licensed to use; leave blank to go back to the
+		-- plain flat color.
+		local WindowBGImageBox = CustomColorsSection:AddTextBox({
+			Name        = "Window Background Image",
+			Placeholder = "rbxassetid://... (blank = none)",
+			Default     = Compkiller.WindowBackgroundImage,
+			Flag        = "UIWindowBGImage",
+			Callback    = function(text)
+				switchToCustom();
+				WindowArgs._SetBackgroundImage(text, nil);
+			end,
+		});
+		table.insert(AdvancedPickers, WindowBGImageBox);
+
+		local WindowBGImageTransparencySlider = CustomColorsSection:AddSlider({
+			Name     = "Background Image Transparency",
+			Flag     = "UIWindowBGImageTransparency",
+			Min      = 0,
+			Max      = 100,
+			Default  = Compkiller.WindowBackgroundImageTransparency * 100,
+			Type     = " %",
+			Round    = 0,
+			Callback = function(v)
+				switchToCustom();
+				WindowArgs._SetBackgroundImage(nil, v / 100);
+			end,
+		});
+		table.insert(AdvancedPickers, WindowBGImageTransparencySlider);
 
 		-- Basic pickers start visible, advanced hidden (matches
 		-- AdvancedColorsToggle's own Default = false above) -- both sets exist
