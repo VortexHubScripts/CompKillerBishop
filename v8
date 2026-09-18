@@ -3569,16 +3569,54 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		IndicatorHexLabel.TextSize = 13;
 		IndicatorHexLabel.TextXAlignment = Enum.TextXAlignment.Left;
 
-		local PulseTween, GlowPulseTween, RenderConn, InputConn;
+		local RenderConn, InputConn;
+
+		-- Legacy PlayerMouse.Target (used before) silently misses a lot of
+		-- real geometry: Terrain isn't a BasePart at all (Target just comes
+		-- back nil over it), and Mouse.X/Mouse.Y don't reliably line up with
+		-- AbsolutePosition-space UI on a screen with IgnoreGuiInset = true --
+		-- both are exactly the "hovers over stuff and the color doesn't
+		-- change, or it looks past the object" reports. A real camera-space
+		-- raycast against the world (with only the local character excluded)
+		-- plus UserInputService:GetMouseLocation() for on-screen placement
+		-- fixes both: it hits Terrain, MeshParts, Unions, etc, and its pixel
+		-- coordinates actually match this ScreenGui's coordinate space.
+		local function EyedropperSample()
+			local Camera = workspace.CurrentCamera;
+			local MouseLoc = UserInputService:GetMouseLocation();
+
+			if not Camera then return nil, MouseLoc; end;
+
+			local ViewportRay = Camera:ViewportPointToRay(MouseLoc.X, MouseLoc.Y);
+
+			local Params = RaycastParams.new();
+			Params.FilterType = Enum.RaycastFilterType.Exclude;
+			Params.FilterDescendantsInstances = (LocalPlayer.Character and { LocalPlayer.Character }) or {};
+
+			local Result = workspace:Raycast(ViewportRay.Origin, ViewportRay.Direction * 10000, Params);
+
+			if not Result or not Result.Instance then return nil, MouseLoc; end;
+
+			if Result.Instance:IsA("Terrain") then
+				local Ok, Color = pcall(function() return Result.Instance:GetMaterialColor(Result.Material); end);
+				return (Ok and Color) or nil, MouseLoc;
+			elseif Result.Instance:IsA("BasePart") then
+				return Result.Instance.Color, MouseLoc;
+			end;
+
+			return nil, MouseLoc;
+		end;
 
 		local function StopVisuals()
-			if PulseTween then PulseTween:Cancel(); PulseTween = nil; end;
-			if GlowPulseTween then GlowPulseTween:Cancel(); GlowPulseTween = nil; end;
 			if RenderConn then RenderConn:Disconnect(); RenderConn = nil; end;
 			if InputConn then InputConn:Disconnect(); InputConn = nil; end;
 
-			EyedropperButton.ImageTransparency = 0;
-			EyedropperGlow.BackgroundTransparency = 1;
+			-- Single fade back to idle instead of leaving a pulsing tween
+			-- hanging around -- see the matching fade-in note in
+			-- StartSampling for why this replaced the old blink loop.
+			Compkiller:_Animation(EyedropperButton, TweenInfo.new(0.15), { ImageTransparency = 0 });
+			Compkiller:_Animation(EyedropperGlow, TweenInfo.new(0.15), { BackgroundTransparency = 1 });
+
 			Indicator.Visible = false;
 			IndicatorShadow.Visible = false;
 		end;
@@ -3600,28 +3638,28 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		local function StartSampling()
 			IsSampling = true;
 
-			PulseTween = Compkiller:_Animation(EyedropperButton, TweenInfo.new(0.45, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
-				ImageTransparency = 0.65
-			});
-
-			GlowPulseTween = Compkiller:_Animation(EyedropperGlow, TweenInfo.new(0.45, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
-				BackgroundTransparency = 0.55
-			});
+			-- A steady highlighted state instead of a looping blink -- the
+			-- old -1-repeat pulse read as "something is flickering/broken"
+			-- rather than "this button is active". The cursor pill is
+			-- already an unambiguous signal that sampling is armed.
+			Compkiller:_Animation(EyedropperButton, TweenInfo.new(0.15), { ImageTransparency = 0.35 });
+			Compkiller:_Animation(EyedropperGlow, TweenInfo.new(0.15), { BackgroundTransparency = 0.35 });
 
 			RenderConn = RunService.RenderStepped:Connect(function()
-				local Target = Mouse.Target;
+				local Color, MouseLoc = EyedropperSample();
 
-				if Target and Target:IsA("BasePart") then
-					-- Position set directly (no tween) so the pill tracks the
-					-- cursor exactly instead of perpetually chasing it through
-					-- overlapping tweens -- same fix already applied to window
-					-- dragging and the color box's own drag handling.
-					local Pos = UDim2.fromOffset(Mouse.X + 18, Mouse.Y + 18);
-					Indicator.Position = Pos;
-					IndicatorShadow.Position = UDim2.fromOffset(Mouse.X + 21, Mouse.Y + 21);
+				if Color then
+					Indicator.Position = UDim2.fromOffset(MouseLoc.X + 18, MouseLoc.Y + 18);
+					IndicatorShadow.Position = UDim2.fromOffset(MouseLoc.X + 21, MouseLoc.Y + 21);
 
-					IndicatorSwatch.BackgroundColor3 = Target.Color;
-					IndicatorHexLabel.Text = "#" .. Target.Color:ToHex();
+					IndicatorSwatch.BackgroundColor3 = Color;
+					IndicatorHexLabel.Text = "#" .. Color:ToHex();
+
+					-- Contrast the swatch's own border against whatever color
+					-- was just sampled, so the ring stays visible whether
+					-- you're hovering something very light or very dark.
+					local Brightness = (Color.R * 0.299) + (Color.G * 0.587) + (Color.B * 0.114);
+					IndicatorSwatchStroke.Color = (Brightness > 0.6) and Color3.new(0, 0, 0) or Color3.new(1, 1, 1);
 
 					Indicator.Visible = true;
 					IndicatorShadow.Visible = true;
@@ -3647,17 +3685,17 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 				-- since not everything on it necessarily sets Input.Handled.
 				if GameProcessed or Compkiller:_IsMouseOverFrame(ColorPickerWindow) then return; end;
 
-				local Target = Mouse.Target;
+				local Color = EyedropperSample();
 
-				if Target and Target:IsA("BasePart") then
-					H, S, V = Target.Color:ToHSV();
+				if Color then
+					H, S, V = Color:ToHSV();
 					Args:Update();
 					CommitSampling();
 				end;
-				-- A click with nothing under the cursor (sky, empty space)
-				-- stays armed instead of cancelling, so one stray miss-click
-				-- doesn't throw away the whole attempt -- only Escape or the
-				-- eyedropper button itself cancels.
+				-- A click that hits nothing (sky, void) stays armed instead
+				-- of cancelling, so one stray miss-click doesn't throw away
+				-- the whole attempt -- only Escape or the eyedropper button
+				-- itself cancels.
 			end);
 		end;
 
