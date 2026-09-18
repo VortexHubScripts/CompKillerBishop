@@ -3480,57 +3480,122 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		Args:Update();
 	end);
 
-	-- Eyedropper: arms a one-shot listener for the next left-click anywhere
-	-- in the game and samples whatever BasePart was under the cursor. A
-	-- transient, user-initiated connection (armed on click, torn down after
-	-- exactly one use or Escape) rather than a permanent per-picker listener,
-	-- so this doesn't need routing through the shared input dispatchers the
-	-- rest of the library uses for always-on per-element connections.
+	-- Eyedropper: click to arm, then every part the mouse hovers is PREVIEWED
+	-- live -- both in the picker's own hex/box/sliders and via a small swatch
+	-- that follows the cursor -- so you can see the color before committing
+	-- to it. Click a part to commit, or press Escape / click the eyedropper
+	-- button again to cancel and snap back to whatever color was set before
+	-- sampling started. A transient, user-initiated set of connections
+	-- (armed on click, torn down on commit/cancel) rather than always-on
+	-- listeners, so this doesn't need routing through the shared input
+	-- dispatchers the rest of the library uses for permanent per-element
+	-- connections.
 	do
 		local IsSampling = false;
+		local OriginalH, OriginalS, OriginalV = 0, 0, 0;
 
-		EyedropperButton.MouseButton1Click:Connect(function()
-			if IsSampling then return; end;
+		-- Follows the cursor while sampling, showing the color currently
+		-- under it -- the popup panel itself sits well away from the game
+		-- world you're actually pointing at, so it alone wasn't enough
+		-- feedback for what you're about to pick.
+		local MouseSwatch = Instance.new("Frame");
+		MouseSwatch.Name = Compkiller:_RandomString();
+		MouseSwatch.Parent = Window;
+		MouseSwatch.AnchorPoint = Vector2.new(0, 1);
+		MouseSwatch.BackgroundColor3 = Color3.new(1, 1, 1);
+		MouseSwatch.BorderSizePixel = 0;
+		MouseSwatch.Size = UDim2.new(0, 18, 0, 18);
+		MouseSwatch.ZIndex = BaseZ_Index + 500;
+		MouseSwatch.Visible = false;
+		MouseSwatch.Active = false;
 
+		local MouseSwatchCorner = Instance.new("UICorner");
+		MouseSwatchCorner.CornerRadius = UDim.new(0, 4);
+		MouseSwatchCorner.Parent = MouseSwatch;
+
+		local MouseSwatchStroke = Instance.new("UIStroke");
+		MouseSwatchStroke.Color = Color3.new(1, 1, 1);
+		MouseSwatchStroke.Thickness = 1.5;
+		MouseSwatchStroke.Parent = MouseSwatch;
+
+		local PulseTween, GlowPulseTween, RenderConn, InputConn;
+
+		local function StopVisuals()
+			if PulseTween then PulseTween:Cancel(); PulseTween = nil; end;
+			if GlowPulseTween then GlowPulseTween:Cancel(); GlowPulseTween = nil; end;
+			if RenderConn then RenderConn:Disconnect(); RenderConn = nil; end;
+			if InputConn then InputConn:Disconnect(); InputConn = nil; end;
+
+			EyedropperButton.ImageTransparency = 0;
+			EyedropperGlow.BackgroundTransparency = 1;
+			MouseSwatch.Visible = false;
+		end;
+
+		-- Escape or re-clicking the eyedropper button while sampling: throw
+		-- the preview away and restore exactly what was set before sampling
+		-- started (the live-preview loop below only ever mutates H/S/V, so
+		-- resetting those and re-rendering is a full revert).
+		local function CancelSampling()
+			if not IsSampling then return; end;
+			IsSampling = false;
+
+			H, S, V = OriginalH, OriginalS, OriginalV;
+			Args:Update(true);
+
+			StopVisuals();
+		end;
+
+		local function CommitSampling()
+			if not IsSampling then return; end;
+			IsSampling = false;
+
+			StopVisuals();
+		end;
+
+		local function StartSampling()
 			IsSampling = true;
 
-			local PulseTween = Compkiller:_Animation(EyedropperButton, TweenInfo.new(0.45, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+			OriginalH, OriginalS, OriginalV = H, S, V;
+
+			PulseTween = Compkiller:_Animation(EyedropperButton, TweenInfo.new(0.45, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
 				ImageTransparency = 0.65
 			});
 
-			local GlowPulseTween = Compkiller:_Animation(EyedropperGlow, TweenInfo.new(0.45, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+			GlowPulseTween = Compkiller:_Animation(EyedropperGlow, TweenInfo.new(0.45, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
 				BackgroundTransparency = 0.55
 			});
 
-			-- Swap the hex box's own text to an explicit status message so the
-			-- "listening for a click" state doesn't rely on noticing a small
-			-- icon pulse at all -- it's readable at a glance.
-			local PreviousHexText = TextLabel.Text;
-			TextLabel.Text = "Click a part to sample...";
+			RenderConn = RunService.RenderStepped:Connect(function()
+				local Target = Mouse.Target;
 
-			local InputConn;
+				if Target and Target:IsA("BasePart") then
+					MouseSwatch.Position = UDim2.fromOffset(Mouse.X + 16, Mouse.Y + 16);
+					MouseSwatch.BackgroundColor3 = Target.Color;
+					MouseSwatch.Visible = true;
 
-			local function StopSampling()
-				IsSampling = false;
-				PulseTween:Cancel();
-				GlowPulseTween:Cancel();
-				EyedropperButton.ImageTransparency = 0;
-				EyedropperGlow.BackgroundTransparency = 1;
-				if TextLabel.Text == "Click a part to sample..." then
-					TextLabel.Text = PreviousHexText;
+					-- Silent + Instant: previews in the picker's own hex/box/
+					-- sliders on every frame the mouse moves without firing
+					-- the real Callback (so nothing is actually applied/
+					-- saved yet) and without tweening (a fresh 0.2s tween
+					-- started every frame would perpetually chase the cursor
+					-- instead of tracking it, same issue already fixed for
+					-- window dragging elsewhere in this file).
+					H, S, V = Target.Color:ToHSV();
+					Args:Update(true, true);
+				else
+					MouseSwatch.Visible = false;
 				end;
-				if InputConn then InputConn:Disconnect(); end;
-			end;
+			end);
 
 			InputConn = UserInputService.InputBegan:Connect(function(Input, GameProcessed)
 				if Input.KeyCode == Enum.KeyCode.Escape then
-					StopSampling();
+					CancelSampling();
 					return;
 				end;
 
 				if Input.UserInputType ~= Enum.UserInputType.MouseButton1 then return; end;
 
-				-- A click any other GUI element (a button elsewhere in the
+				-- A click on any other GUI element (a button elsewhere in the
 				-- panel, another picker, etc) absorbs first and sets this --
 				-- ignore it so sampling doesn't fire alongside whatever that
 				-- element's own click does, and keep it armed for the actual
@@ -3540,13 +3605,24 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 
 				local Target = Mouse.Target;
 
-				StopSampling();
-
 				if Target and Target:IsA("BasePart") then
 					H, S, V = Target.Color:ToHSV();
 					Args:Update();
+					CommitSampling();
 				end;
+				-- A click with nothing under the cursor (sky, empty space)
+				-- stays armed instead of cancelling, so one stray miss-click
+				-- doesn't throw away the whole attempt -- only Escape or the
+				-- eyedropper button itself cancels.
 			end);
+		end;
+
+		EyedropperButton.MouseButton1Click:Connect(function()
+			if IsSampling then
+				CancelSampling();
+			else
+				StartSampling();
+			end;
 		end);
 	end;
 
@@ -4525,14 +4601,14 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 		local Button = Compkiller:_Input(ColorPicker);
 
-		local ColorPicker = Compkiller:_AddColorPickerPanel(Button,function(color,opc)
+		local ColorPicker = Compkiller:_AddColorPickerPanel(Button,function(color,opc,silent)
 			Config.Default = color;
 			Config.Transparency = opc;
 
 			ColorFrame.BackgroundColor3 = color;
 			ColorFrame.BackgroundTransparency = opc;
 
-			if Config.Callback then Config.Callback(Config.Default , Config.Transparency); end;
+			if not silent and Config.Callback then Config.Callback(Config.Default , Config.Transparency); end;
 		end);
 
 		-- Same "active" glow as the section-level AddColorPicker, so a picker
@@ -11426,53 +11502,6 @@ function Compkiller.new(Config : Window)
 		});
 		_customColorPickers[DropdownTextPicker] = "DropdownTextColor";
 		table.insert(AdvancedPickers, DropdownTextPicker);
-
-		-- Window Background Transparency: how see-through the whole window
-		-- panel is while open. NOT the same property the Insert/toggle
-		-- keybind uses to hide the window (that still goes to fully opaque-1,
-		-- unaffected) -- this only changes what "open" looks like. Clamped to
-		-- 85% so it can never cross into that hidden threshold by accident.
-		local WindowTransparencySlider = CustomColorsSection:AddSlider({
-			Name     = "Window Background Transparency",
-			Flag     = "UIWindowBGTransparency",
-			Min      = 0,
-			Max      = 85,
-			Default  = Compkiller.WindowBackgroundTransparency * 100,
-			Type     = " %",
-			Round    = 0,
-			Callback = function(v)
-				switchToCustom();
-				Compkiller.WindowBackgroundTransparency = v / 100;
-
-				-- Apply immediately if the window is currently open -- the
-				-- value is otherwise only read the next time it's toggled.
-				if WindowOpen:GetValue() and not WindowArgs.PerformanceMode then
-					Compkiller:_Animation(MainFrame, TweenInfo.new(0.15), {
-						BackgroundTransparency = Compkiller.WindowBackgroundTransparency
-					});
-				end;
-			end,
-		});
-		table.insert(AdvancedPickers, WindowTransparencySlider);
-
-		-- Block Transparency: every Section panel (each rounded card a
-		-- section draws) shares this. Unlike the window, nothing else ever
-		-- animates a Section's own transparency, so this is just applied
-		-- directly -- no clamping needed, 0-100% is all genuinely safe.
-		local BlockTransparencySlider = CustomColorsSection:AddSlider({
-			Name     = "Block Transparency",
-			Flag     = "UIBlockTransparency",
-			Min      = 0,
-			Max      = 100,
-			Default  = Compkiller.BlockTransparency * 100,
-			Type     = " %",
-			Round    = 0,
-			Callback = function(v)
-				switchToCustom();
-				Compkiller:SetBlockTransparency(v / 100);
-			end,
-		});
-		table.insert(AdvancedPickers, BlockTransparencySlider);
 
 		-- Window Background Image: an optional custom image/texture behind
 		-- every tab's content (never over the tab sidebar strip). Paste any
