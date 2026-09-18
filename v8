@@ -3119,6 +3119,32 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		Property = 'ImageColor3'
 	});
 
+	-- A pulsing icon alone (0 <-> 0.65 transparency on a 15x15 icon) was too
+	-- subtle to notice, especially with the popup panel itself also pulling
+	-- attention -- there was no OBVIOUS "this is currently listening for a
+	-- world click" state. A visible accent-colored glow behind the button
+	-- fixes that; parented behind the button (lower ZIndex) so it never
+	-- blocks the click.
+	local EyedropperGlow = Instance.new("Frame")
+	EyedropperGlow.Name = Compkiller:_RandomString()
+	EyedropperGlow.Parent = HexFrame
+	EyedropperGlow.AnchorPoint = Vector2.new(1, 0.5)
+	EyedropperGlow.BackgroundColor3 = Compkiller.Colors.Highlight
+	EyedropperGlow.BackgroundTransparency = 1
+	EyedropperGlow.BorderSizePixel = 0
+	EyedropperGlow.Position = UDim2.new(1, -6, 0.5, 0)
+	EyedropperGlow.Size = UDim2.new(0, 24, 0, 24)
+	EyedropperGlow.ZIndex = EyedropperButton.ZIndex - 1;
+
+	table.insert(Compkiller.Elements.Highlight, {
+		Element = EyedropperGlow,
+		Property = 'BackgroundColor3'
+	});
+
+	local EyedropperGlowCorner = Instance.new("UICorner")
+	EyedropperGlowCorner.CornerRadius = UDim.new(1, 0)
+	EyedropperGlowCorner.Parent = EyedropperGlow
+
 	Compkiller:_Hover(EyedropperButton, function()
 		Compkiller:_Animation(EyedropperButton, TweenInfo.new(0.15), { ImageTransparency = 0.25 });
 	end, function()
@@ -3472,12 +3498,27 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 				ImageTransparency = 0.65
 			});
 
+			local GlowPulseTween = Compkiller:_Animation(EyedropperGlow, TweenInfo.new(0.45, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+				BackgroundTransparency = 0.55
+			});
+
+			-- Swap the hex box's own text to an explicit status message so the
+			-- "listening for a click" state doesn't rely on noticing a small
+			-- icon pulse at all -- it's readable at a glance.
+			local PreviousHexText = TextLabel.Text;
+			TextLabel.Text = "Click a part to sample...";
+
 			local InputConn;
 
 			local function StopSampling()
 				IsSampling = false;
 				PulseTween:Cancel();
+				GlowPulseTween:Cancel();
 				EyedropperButton.ImageTransparency = 0;
+				EyedropperGlow.BackgroundTransparency = 1;
+				if TextLabel.Text == "Click a part to sample..." then
+					TextLabel.Text = PreviousHexText;
+				end;
 				if InputConn then InputConn:Disconnect(); end;
 			end;
 
@@ -8081,18 +8122,21 @@ function Compkiller.new(Config : Window)
 	TabMainFrame.ZIndex = 5
 
 	-- Optional custom background image (UI Settings -> Custom Colors ->
-	-- Advanced), sat behind every real tab's content (all of which use
-	-- higher ZIndex values, e.g. TabContent's Left/Right at 8) but inside
-	-- TabMainFrame so it never bleeds into the tab sidebar strip. Created
-	-- once here and mutated later via Compkiller.WindowBackgroundImage/
-	-- WindowBackgroundImageTransparency rather than a per-picker element.
+	-- Advanced), sat behind every real tab's content. TabMainFrame is sized
+	-- to cover the ENTIRE MainFrame (same region the TabFrame sidebar strip
+	-- occupies), and CompKiller uses ZIndexBehavior.Global -- so with
+	-- ZIndex = TabMainFrame.ZIndex (5), this used to paint on TOP of
+	-- TabFrame and its icons/labels (which default to ZIndex 1-3), not
+	-- behind them as the old comment claimed. A ZIndex below everything
+	-- else in the window (TabFrame, TabContent, Sections, ...) is what
+	-- actually keeps it as a back layer under Global ordering.
 	local BGImageLabel = Instance.new("ImageLabel")
 	BGImageLabel.Name = Compkiller:_RandomString()
 	BGImageLabel.Parent = TabMainFrame
 	BGImageLabel.BackgroundTransparency = 1
 	BGImageLabel.BorderSizePixel = 0
 	BGImageLabel.Size = UDim2.new(1, 0, 1, 0)
-	BGImageLabel.ZIndex = TabMainFrame.ZIndex
+	BGImageLabel.ZIndex = 0
 	BGImageLabel.ScaleType = Enum.ScaleType.Crop
 	BGImageLabel.Image = (Compkiller.WindowBackgroundImage ~= "" and Compkiller:CacheImage(Compkiller.WindowBackgroundImage)) or "";
 	BGImageLabel.ImageTransparency = Compkiller.WindowBackgroundImageTransparency;
@@ -12773,8 +12817,12 @@ function Compkiller.new(Config : Window)
 
 			TabOpenSignal:Connect(function(bool)
 				if bool then
+					-- Was hardcoded to 0, silently overriding Compkiller.BlockTransparency
+					-- (the Block Transparency slider in UI Settings) every time this tab
+					-- was reselected -- the slider "worked" only until you switched tabs
+					-- and back, then snapped to fully opaque again.
 					Compkiller:_Animation(Section,TweenInfo.new(0.21),{
-						BackgroundTransparency = 0
+						BackgroundTransparency = Compkiller.BlockTransparency
 					})
 
 					Compkiller:_Animation(SectionText,TweenInfo.new(0.21),{
