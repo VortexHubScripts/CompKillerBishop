@@ -3480,113 +3480,37 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		Args:Update();
 	end);
 
-	-- Eyedropper: click to arm, then hover any part to preview its color on
-	-- a pill that follows the cursor (swatch + hex readout) -- click that
-	-- part to commit it to the picker, or press Escape / click the
-	-- eyedropper button again to cancel. The picker's own hex/box/sliders
-	-- are untouched until an actual commit -- no live-writes on every mouse
-	-- move, the cursor pill is the only thing that updates per frame. A
-	-- transient, user-initiated set of connections (armed on click, torn
-	-- down on commit/cancel) rather than always-on listeners, so this
-	-- doesn't need routing through the shared input dispatchers the rest of
-	-- the library uses for permanent per-element connections.
+	-- Eyedropper: click to arm, then hover any part and the picker's OWN
+	-- swatch button live-previews that color directly -- no separate
+	-- floating indicator near the cursor. Click a part to commit it (a real
+	-- apply, same as typing a hex code), or press Escape / click the
+	-- eyedropper button again to cancel and put the swatch back to whatever
+	-- it was before sampling started. Only the swatch changes during
+	-- preview -- the popup's own hex/box/hue sliders are untouched until an
+	-- actual commit, matching how those are only ever meant to reflect a
+	-- real, applied value. A transient, user-initiated set of connections
+	-- (armed on click, torn down on commit/cancel) rather than always-on
+	-- listeners, so this doesn't need routing through the shared input
+	-- dispatchers the rest of the library uses for permanent per-element
+	-- connections.
 	do
 		local IsSampling = false;
-
-		-- Cursor-following pill: a dark backing card with a shadow, a
-		-- rounded swatch showing the color under the cursor, and a hex
-		-- readout next to it -- replaces the old bare 18x18 square, which
-		-- was too small/plain to read at a glance while looking at the game
-		-- world instead of the picker panel.
-		local IndicatorShadow = Instance.new("Frame");
-		IndicatorShadow.Name = Compkiller:_RandomString();
-		IndicatorShadow.Parent = Window;
-		IndicatorShadow.AnchorPoint = Vector2.new(0, 1);
-		IndicatorShadow.BackgroundColor3 = Color3.new(0, 0, 0);
-		IndicatorShadow.BackgroundTransparency = 0.55;
-		IndicatorShadow.BorderSizePixel = 0;
-		IndicatorShadow.Size = UDim2.new(0, 108, 0, 36);
-		IndicatorShadow.ZIndex = BaseZ_Index + 499;
-		IndicatorShadow.Visible = false;
-
-		local IndicatorShadowCorner = Instance.new("UICorner");
-		IndicatorShadowCorner.CornerRadius = UDim.new(0, 9);
-		IndicatorShadowCorner.Parent = IndicatorShadow;
-
-		local Indicator = Instance.new("Frame");
-		Indicator.Name = Compkiller:_RandomString();
-		Indicator.Parent = Window;
-		Indicator.AnchorPoint = Vector2.new(0, 1);
-		Indicator.BackgroundColor3 = Color3.fromRGB(24, 24, 28);
-		Indicator.BackgroundTransparency = 0.05;
-		Indicator.BorderSizePixel = 0;
-		Indicator.Size = UDim2.new(0, 108, 0, 36);
-		Indicator.ZIndex = BaseZ_Index + 500;
-		Indicator.Visible = false;
-		Indicator.Active = false;
-
-		local IndicatorCorner = Instance.new("UICorner");
-		IndicatorCorner.CornerRadius = UDim.new(0, 9);
-		IndicatorCorner.Parent = Indicator;
-
-		local IndicatorStroke = Instance.new("UIStroke");
-		IndicatorStroke.Color = Color3.fromRGB(255, 255, 255);
-		IndicatorStroke.Transparency = 0.75;
-		IndicatorStroke.Thickness = 1;
-		IndicatorStroke.Parent = Indicator;
-
-		local IndicatorSwatch = Instance.new("Frame");
-		IndicatorSwatch.Name = Compkiller:_RandomString();
-		IndicatorSwatch.Parent = Indicator;
-		IndicatorSwatch.AnchorPoint = Vector2.new(0, 0.5);
-		IndicatorSwatch.BackgroundColor3 = Color3.new(1, 1, 1);
-		IndicatorSwatch.BorderSizePixel = 0;
-		IndicatorSwatch.Position = UDim2.new(0, 6, 0.5, 0);
-		IndicatorSwatch.Size = UDim2.new(0, 24, 0, 24);
-		IndicatorSwatch.ZIndex = Indicator.ZIndex + 1;
-
-		local IndicatorSwatchCorner = Instance.new("UICorner");
-		IndicatorSwatchCorner.CornerRadius = UDim.new(0, 6);
-		IndicatorSwatchCorner.Parent = IndicatorSwatch;
-
-		local IndicatorSwatchStroke = Instance.new("UIStroke");
-		IndicatorSwatchStroke.Color = Color3.new(1, 1, 1);
-		IndicatorSwatchStroke.Transparency = 0.3;
-		IndicatorSwatchStroke.Thickness = 1.5;
-		IndicatorSwatchStroke.Parent = IndicatorSwatch;
-
-		local IndicatorHexLabel = Instance.new("TextLabel");
-		IndicatorHexLabel.Name = Compkiller:_RandomString();
-		IndicatorHexLabel.Parent = Indicator;
-		IndicatorHexLabel.AnchorPoint = Vector2.new(0, 0.5);
-		IndicatorHexLabel.BackgroundTransparency = 1;
-		IndicatorHexLabel.Position = UDim2.new(0, 38, 0.5, 0);
-		IndicatorHexLabel.Size = UDim2.new(0, 64, 0, 20);
-		IndicatorHexLabel.ZIndex = Indicator.ZIndex + 1;
-		IndicatorHexLabel.Font = Enum.Font.GothamBold;
-		IndicatorHexLabel.Text = "#------";
-		IndicatorHexLabel.TextColor3 = Color3.new(1, 1, 1);
-		IndicatorHexLabel.TextSize = 13;
-		IndicatorHexLabel.TextXAlignment = Enum.TextXAlignment.Left;
-
 		local RenderConn, InputConn;
 
-		-- Legacy PlayerMouse.Target (used before) silently misses a lot of
-		-- real geometry: Terrain isn't a BasePart at all (Target just comes
-		-- back nil over it), and Mouse.X/Mouse.Y don't reliably line up with
+		-- Legacy PlayerMouse.Target silently misses a lot of real geometry:
+		-- Terrain isn't a BasePart at all (Target just comes back nil over
+		-- it), and Mouse.X/Mouse.Y don't reliably line up with
 		-- AbsolutePosition-space UI on a screen with IgnoreGuiInset = true --
 		-- both are exactly the "hovers over stuff and the color doesn't
 		-- change, or it looks past the object" reports. A real camera-space
 		-- raycast against the world (with only the local character excluded)
-		-- plus UserInputService:GetMouseLocation() for on-screen placement
-		-- fixes both: it hits Terrain, MeshParts, Unions, etc, and its pixel
-		-- coordinates actually match this ScreenGui's coordinate space.
+		-- fixes both: it hits Terrain, MeshParts, Unions, etc.
 		local function EyedropperSample()
 			local Camera = workspace.CurrentCamera;
+
+			if not Camera then return nil; end;
+
 			local MouseLoc = UserInputService:GetMouseLocation();
-
-			if not Camera then return nil, MouseLoc; end;
-
 			local ViewportRay = Camera:ViewportPointToRay(MouseLoc.X, MouseLoc.Y);
 
 			local Params = RaycastParams.new();
@@ -3595,35 +3519,38 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 
 			local Result = workspace:Raycast(ViewportRay.Origin, ViewportRay.Direction * 10000, Params);
 
-			if not Result or not Result.Instance then return nil, MouseLoc; end;
+			if not Result or not Result.Instance then return nil; end;
 
 			if Result.Instance:IsA("Terrain") then
 				local Ok, Color = pcall(function() return Result.Instance:GetMaterialColor(Result.Material); end);
-				return (Ok and Color) or nil, MouseLoc;
+				return (Ok and Color) or nil;
 			elseif Result.Instance:IsA("BasePart") then
-				return Result.Instance.Color, MouseLoc;
+				return Result.Instance.Color;
 			end;
 
-			return nil, MouseLoc;
+			return nil;
 		end;
+
+		local OriginalColor;
 
 		local function StopVisuals()
 			if RenderConn then RenderConn:Disconnect(); RenderConn = nil; end;
 			if InputConn then InputConn:Disconnect(); InputConn = nil; end;
 
-			-- Single fade back to idle instead of leaving a pulsing tween
-			-- hanging around -- see the matching fade-in note in
-			-- StartSampling for why this replaced the old blink loop.
+			-- Single fade back to idle instead of a looping blink -- see the
+			-- matching fade-in note in StartSampling for why.
 			Compkiller:_Animation(EyedropperButton, TweenInfo.new(0.15), { ImageTransparency = 0 });
 			Compkiller:_Animation(EyedropperGlow, TweenInfo.new(0.15), { BackgroundTransparency = 1 });
-
-			Indicator.Visible = false;
-			IndicatorShadow.Visible = false;
 		end;
 
 		local function CancelSampling()
 			if not IsSampling then return; end;
 			IsSampling = false;
+
+			-- Directly through Callback (not Args:Update) so only the
+			-- swatch snaps back -- the popup's hex/box/sliders were never
+			-- touched during preview, so there's nothing to revert there.
+			if OriginalColor then Callback(OriginalColor, Transparency, true); end;
 
 			StopVisuals();
 		end;
@@ -3637,35 +3564,24 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 
 		local function StartSampling()
 			IsSampling = true;
+			OriginalColor = Color3.fromHSV(H, S, V);
 
 			-- A steady highlighted state instead of a looping blink -- the
 			-- old -1-repeat pulse read as "something is flickering/broken"
-			-- rather than "this button is active". The cursor pill is
-			-- already an unambiguous signal that sampling is armed.
+			-- rather than "this button is active".
 			Compkiller:_Animation(EyedropperButton, TweenInfo.new(0.15), { ImageTransparency = 0.35 });
 			Compkiller:_Animation(EyedropperGlow, TweenInfo.new(0.15), { BackgroundTransparency = 0.35 });
 
 			RenderConn = RunService.RenderStepped:Connect(function()
-				local Color, MouseLoc = EyedropperSample();
+				local Color = EyedropperSample();
 
 				if Color then
-					Indicator.Position = UDim2.fromOffset(MouseLoc.X + 18, MouseLoc.Y + 18);
-					IndicatorShadow.Position = UDim2.fromOffset(MouseLoc.X + 21, MouseLoc.Y + 21);
-
-					IndicatorSwatch.BackgroundColor3 = Color;
-					IndicatorHexLabel.Text = "#" .. Color:ToHex();
-
-					-- Contrast the swatch's own border against whatever color
-					-- was just sampled, so the ring stays visible whether
-					-- you're hovering something very light or very dark.
-					local Brightness = (Color.R * 0.299) + (Color.G * 0.587) + (Color.B * 0.114);
-					IndicatorSwatchStroke.Color = (Brightness > 0.6) and Color3.new(0, 0, 0) or Color3.new(1, 1, 1);
-
-					Indicator.Visible = true;
-					IndicatorShadow.Visible = true;
-				else
-					Indicator.Visible = false;
-					IndicatorShadow.Visible = false;
+					-- Straight to Callback, bypassing Args:Update entirely --
+					-- this is what actually repaints the swatch button
+					-- itself (the thing you clicked to open this panel)
+					-- live as the cursor moves, without also rewriting the
+					-- popup's own hex text/box/hue slider on every frame.
+					Callback(Color, Transparency, true);
 				end;
 			end);
 
