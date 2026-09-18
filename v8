@@ -3480,43 +3480,94 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		Args:Update();
 	end);
 
-	-- Eyedropper: click to arm, then every part the mouse hovers is PREVIEWED
-	-- live -- both in the picker's own hex/box/sliders and via a small swatch
-	-- that follows the cursor -- so you can see the color before committing
-	-- to it. Click a part to commit, or press Escape / click the eyedropper
-	-- button again to cancel and snap back to whatever color was set before
-	-- sampling started. A transient, user-initiated set of connections
-	-- (armed on click, torn down on commit/cancel) rather than always-on
-	-- listeners, so this doesn't need routing through the shared input
-	-- dispatchers the rest of the library uses for permanent per-element
-	-- connections.
+	-- Eyedropper: click to arm, then hover any part to preview its color on
+	-- a pill that follows the cursor (swatch + hex readout) -- click that
+	-- part to commit it to the picker, or press Escape / click the
+	-- eyedropper button again to cancel. The picker's own hex/box/sliders
+	-- are untouched until an actual commit -- no live-writes on every mouse
+	-- move, the cursor pill is the only thing that updates per frame. A
+	-- transient, user-initiated set of connections (armed on click, torn
+	-- down on commit/cancel) rather than always-on listeners, so this
+	-- doesn't need routing through the shared input dispatchers the rest of
+	-- the library uses for permanent per-element connections.
 	do
 		local IsSampling = false;
-		local OriginalH, OriginalS, OriginalV = 0, 0, 0;
 
-		-- Follows the cursor while sampling, showing the color currently
-		-- under it -- the popup panel itself sits well away from the game
-		-- world you're actually pointing at, so it alone wasn't enough
-		-- feedback for what you're about to pick.
-		local MouseSwatch = Instance.new("Frame");
-		MouseSwatch.Name = Compkiller:_RandomString();
-		MouseSwatch.Parent = Window;
-		MouseSwatch.AnchorPoint = Vector2.new(0, 1);
-		MouseSwatch.BackgroundColor3 = Color3.new(1, 1, 1);
-		MouseSwatch.BorderSizePixel = 0;
-		MouseSwatch.Size = UDim2.new(0, 18, 0, 18);
-		MouseSwatch.ZIndex = BaseZ_Index + 500;
-		MouseSwatch.Visible = false;
-		MouseSwatch.Active = false;
+		-- Cursor-following pill: a dark backing card with a shadow, a
+		-- rounded swatch showing the color under the cursor, and a hex
+		-- readout next to it -- replaces the old bare 18x18 square, which
+		-- was too small/plain to read at a glance while looking at the game
+		-- world instead of the picker panel.
+		local IndicatorShadow = Instance.new("Frame");
+		IndicatorShadow.Name = Compkiller:_RandomString();
+		IndicatorShadow.Parent = Window;
+		IndicatorShadow.AnchorPoint = Vector2.new(0, 1);
+		IndicatorShadow.BackgroundColor3 = Color3.new(0, 0, 0);
+		IndicatorShadow.BackgroundTransparency = 0.55;
+		IndicatorShadow.BorderSizePixel = 0;
+		IndicatorShadow.Size = UDim2.new(0, 108, 0, 36);
+		IndicatorShadow.ZIndex = BaseZ_Index + 499;
+		IndicatorShadow.Visible = false;
 
-		local MouseSwatchCorner = Instance.new("UICorner");
-		MouseSwatchCorner.CornerRadius = UDim.new(0, 4);
-		MouseSwatchCorner.Parent = MouseSwatch;
+		local IndicatorShadowCorner = Instance.new("UICorner");
+		IndicatorShadowCorner.CornerRadius = UDim.new(0, 9);
+		IndicatorShadowCorner.Parent = IndicatorShadow;
 
-		local MouseSwatchStroke = Instance.new("UIStroke");
-		MouseSwatchStroke.Color = Color3.new(1, 1, 1);
-		MouseSwatchStroke.Thickness = 1.5;
-		MouseSwatchStroke.Parent = MouseSwatch;
+		local Indicator = Instance.new("Frame");
+		Indicator.Name = Compkiller:_RandomString();
+		Indicator.Parent = Window;
+		Indicator.AnchorPoint = Vector2.new(0, 1);
+		Indicator.BackgroundColor3 = Color3.fromRGB(24, 24, 28);
+		Indicator.BackgroundTransparency = 0.05;
+		Indicator.BorderSizePixel = 0;
+		Indicator.Size = UDim2.new(0, 108, 0, 36);
+		Indicator.ZIndex = BaseZ_Index + 500;
+		Indicator.Visible = false;
+		Indicator.Active = false;
+
+		local IndicatorCorner = Instance.new("UICorner");
+		IndicatorCorner.CornerRadius = UDim.new(0, 9);
+		IndicatorCorner.Parent = Indicator;
+
+		local IndicatorStroke = Instance.new("UIStroke");
+		IndicatorStroke.Color = Color3.fromRGB(255, 255, 255);
+		IndicatorStroke.Transparency = 0.75;
+		IndicatorStroke.Thickness = 1;
+		IndicatorStroke.Parent = Indicator;
+
+		local IndicatorSwatch = Instance.new("Frame");
+		IndicatorSwatch.Name = Compkiller:_RandomString();
+		IndicatorSwatch.Parent = Indicator;
+		IndicatorSwatch.AnchorPoint = Vector2.new(0, 0.5);
+		IndicatorSwatch.BackgroundColor3 = Color3.new(1, 1, 1);
+		IndicatorSwatch.BorderSizePixel = 0;
+		IndicatorSwatch.Position = UDim2.new(0, 6, 0.5, 0);
+		IndicatorSwatch.Size = UDim2.new(0, 24, 0, 24);
+		IndicatorSwatch.ZIndex = Indicator.ZIndex + 1;
+
+		local IndicatorSwatchCorner = Instance.new("UICorner");
+		IndicatorSwatchCorner.CornerRadius = UDim.new(0, 6);
+		IndicatorSwatchCorner.Parent = IndicatorSwatch;
+
+		local IndicatorSwatchStroke = Instance.new("UIStroke");
+		IndicatorSwatchStroke.Color = Color3.new(1, 1, 1);
+		IndicatorSwatchStroke.Transparency = 0.3;
+		IndicatorSwatchStroke.Thickness = 1.5;
+		IndicatorSwatchStroke.Parent = IndicatorSwatch;
+
+		local IndicatorHexLabel = Instance.new("TextLabel");
+		IndicatorHexLabel.Name = Compkiller:_RandomString();
+		IndicatorHexLabel.Parent = Indicator;
+		IndicatorHexLabel.AnchorPoint = Vector2.new(0, 0.5);
+		IndicatorHexLabel.BackgroundTransparency = 1;
+		IndicatorHexLabel.Position = UDim2.new(0, 38, 0.5, 0);
+		IndicatorHexLabel.Size = UDim2.new(0, 64, 0, 20);
+		IndicatorHexLabel.ZIndex = Indicator.ZIndex + 1;
+		IndicatorHexLabel.Font = Enum.Font.GothamBold;
+		IndicatorHexLabel.Text = "#------";
+		IndicatorHexLabel.TextColor3 = Color3.new(1, 1, 1);
+		IndicatorHexLabel.TextSize = 13;
+		IndicatorHexLabel.TextXAlignment = Enum.TextXAlignment.Left;
 
 		local PulseTween, GlowPulseTween, RenderConn, InputConn;
 
@@ -3528,19 +3579,13 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 
 			EyedropperButton.ImageTransparency = 0;
 			EyedropperGlow.BackgroundTransparency = 1;
-			MouseSwatch.Visible = false;
+			Indicator.Visible = false;
+			IndicatorShadow.Visible = false;
 		end;
 
-		-- Escape or re-clicking the eyedropper button while sampling: throw
-		-- the preview away and restore exactly what was set before sampling
-		-- started (the live-preview loop below only ever mutates H/S/V, so
-		-- resetting those and re-rendering is a full revert).
 		local function CancelSampling()
 			if not IsSampling then return; end;
 			IsSampling = false;
-
-			H, S, V = OriginalH, OriginalS, OriginalV;
-			Args:Update(true);
 
 			StopVisuals();
 		end;
@@ -3555,8 +3600,6 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		local function StartSampling()
 			IsSampling = true;
 
-			OriginalH, OriginalS, OriginalV = H, S, V;
-
 			PulseTween = Compkiller:_Animation(EyedropperButton, TweenInfo.new(0.45, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
 				ImageTransparency = 0.65
 			});
@@ -3569,21 +3612,22 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 				local Target = Mouse.Target;
 
 				if Target and Target:IsA("BasePart") then
-					MouseSwatch.Position = UDim2.fromOffset(Mouse.X + 16, Mouse.Y + 16);
-					MouseSwatch.BackgroundColor3 = Target.Color;
-					MouseSwatch.Visible = true;
+					-- Position set directly (no tween) so the pill tracks the
+					-- cursor exactly instead of perpetually chasing it through
+					-- overlapping tweens -- same fix already applied to window
+					-- dragging and the color box's own drag handling.
+					local Pos = UDim2.fromOffset(Mouse.X + 18, Mouse.Y + 18);
+					Indicator.Position = Pos;
+					IndicatorShadow.Position = UDim2.fromOffset(Mouse.X + 21, Mouse.Y + 21);
 
-					-- Silent + Instant: previews in the picker's own hex/box/
-					-- sliders on every frame the mouse moves without firing
-					-- the real Callback (so nothing is actually applied/
-					-- saved yet) and without tweening (a fresh 0.2s tween
-					-- started every frame would perpetually chase the cursor
-					-- instead of tracking it, same issue already fixed for
-					-- window dragging elsewhere in this file).
-					H, S, V = Target.Color:ToHSV();
-					Args:Update(true, true);
+					IndicatorSwatch.BackgroundColor3 = Target.Color;
+					IndicatorHexLabel.Text = "#" .. Target.Color:ToHex();
+
+					Indicator.Visible = true;
+					IndicatorShadow.Visible = true;
 				else
-					MouseSwatch.Visible = false;
+					Indicator.Visible = false;
+					IndicatorShadow.Visible = false;
 				end;
 			end);
 
