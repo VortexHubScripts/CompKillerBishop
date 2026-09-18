@@ -470,6 +470,24 @@ Compkiller.WindowBackgroundTransparency = 0;
 Compkiller.WindowBackgroundImage = "";
 Compkiller.WindowBackgroundImageTransparency = 0.85;
 
+-- Block Transparency: every Section panel (the rounded card each DrawSection
+-- draws, BackgroundColor3 = Colors.BlockColor) shares this. Unlike the window
+-- background, a Section's BackgroundTransparency isn't tied to any open/close
+-- animation or hide threshold -- nothing else ever touches it -- so this can
+-- just be applied directly with no clamping tricks needed.
+Compkiller.BlockTransparency = 0;
+Compkiller._BlockTransparencyTargets = {};
+
+function Compkiller:SetBlockTransparency(value: number)
+	Compkiller.BlockTransparency = value;
+
+	for _, Target in ipairs(Compkiller._BlockTransparencyTargets) do
+		if Target and Target.Parent then
+			pcall(function() Target.BackgroundTransparency = value; end);
+		end;
+	end;
+end;
+
 Compkiller.DragBlacklist = {};
 Compkiller.IaDrag = false;
 Compkiller.LastDrag = tick();
@@ -2229,7 +2247,9 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 			end;
 		end)
 
-		return ColorPicker , ColorFrame;
+		-- 3rd return (the swatch's own border stroke) is new -- existing
+		-- 2-value callers (the mini/Option AddColorPicker) just ignore it.
+		return ColorPicker , ColorFrame, UIStroke;
 	elseif Name == "Keybind" then
 		local Keys = {
 			One = '1',
@@ -3142,6 +3162,12 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		-- matching the same guard already used by the AddToggle/AddSlider
 		-- keybind panel's ToggleUI above.
 		if IsSame then return end;
+
+		-- Lets the caller (Args:AddColorPicker) show an "active" indicator on
+		-- the swatch itself while its panel is open -- without this there was
+		-- no way to tell the picker was even open besides the popup panel's
+		-- own position on screen, easy to lose track of on a busy tab.
+		if Args.OnToggle then Args.OnToggle(bool); end;
 
 		local MainPosition = UDim2.new(0,Button.AbsolutePosition.X + 95,0,Button.AbsolutePosition.Y + 65);
 		local DropPosition = UDim2.new(0,MainPosition.X.Offset,0,MainPosition.Y.Offset + 15);
@@ -4454,7 +4480,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			Callback = function() end
 		});
 
-		local ColorPicker:Frame , ColorFrame: Frame = Value:AddLink('ColorPicker' , Config.Default);
+		local ColorPicker:Frame , ColorFrame: Frame, SwatchStroke: UIStroke = Value:AddLink('ColorPicker' , Config.Default);
 
 		local Button = Compkiller:_Input(ColorPicker);
 
@@ -4467,6 +4493,22 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			if Config.Callback then Config.Callback(Config.Default , Config.Transparency); end;
 		end);
+
+		-- Same "active" glow as the section-level AddColorPicker, so a picker
+		-- nested in an Option panel doesn't look any less "open" than one.
+		ColorPicker.OnToggle = function(bool)
+			if bool then
+				Compkiller:_Animation(SwatchStroke, TweenInfo.new(0.15), {
+					Color = Compkiller.Colors.Highlight,
+					Thickness = 1.5
+				});
+			else
+				Compkiller:_Animation(SwatchStroke, TweenInfo.new(0.15), {
+					Color = Compkiller.Colors.HighStrokeColor,
+					Thickness = 1
+				});
+			end;
+		end;
 
 		ColorPicker:SetColor(Config.Default,Config.Transparency);
 		ColorPicker:Update()
@@ -5766,7 +5808,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		Block:SetVisible(Signal:GetValue());
 
-		local ColorPicker:Frame , ColorFrame: Frame = Block:AddLink('ColorPicker' , Config.Default);
+		local ColorPicker:Frame , ColorFrame: Frame, SwatchStroke: UIStroke = Block:AddLink('ColorPicker' , Config.Default);
 
 		local Button = Compkiller:_Input(ColorPicker);
 
@@ -5779,6 +5821,23 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 			if not silent and Config.Callback then Config.Callback(Config.Default , Config.Transparency); end;
 		end);
+
+		-- "Active" indicator: the popup panel floats away from the swatch
+		-- with nothing tying it back, so it's easy to think a picker isn't
+		-- open. Glow the swatch's own border in the accent color while it is.
+		ColorPicker.OnToggle = function(bool)
+			if bool then
+				Compkiller:_Animation(SwatchStroke, TweenInfo.new(0.15), {
+					Color = Compkiller.Colors.Highlight,
+					Thickness = 1.5
+				});
+			else
+				Compkiller:_Animation(SwatchStroke, TweenInfo.new(0.15), {
+					Color = Compkiller.Colors.HighStrokeColor,
+					Thickness = 1
+				});
+			end;
+		end;
 
 		ColorPicker:SetColor(Config.Default,Config.Transparency);
 		ColorPicker:Update()
@@ -11352,6 +11411,25 @@ function Compkiller.new(Config : Window)
 		});
 		table.insert(AdvancedPickers, WindowTransparencySlider);
 
+		-- Block Transparency: every Section panel (each rounded card a
+		-- section draws) shares this. Unlike the window, nothing else ever
+		-- animates a Section's own transparency, so this is just applied
+		-- directly -- no clamping needed, 0-100% is all genuinely safe.
+		local BlockTransparencySlider = CustomColorsSection:AddSlider({
+			Name     = "Block Transparency",
+			Flag     = "UIBlockTransparency",
+			Min      = 0,
+			Max      = 100,
+			Default  = Compkiller.BlockTransparency * 100,
+			Type     = " %",
+			Round    = 0,
+			Callback = function(v)
+				switchToCustom();
+				Compkiller:SetBlockTransparency(v / 100);
+			end,
+		});
+		table.insert(AdvancedPickers, BlockTransparencySlider);
+
 		-- Window Background Image: an optional custom image/texture behind
 		-- every tab's content (never over the tab sidebar strip). Paste any
 		-- asset id you're licensed to use; leave blank to go back to the
@@ -12495,11 +12573,14 @@ function Compkiller.new(Config : Window)
 			end;
 
 			Section.BackgroundColor3 = Compkiller.Colors.BlockColor
+			Section.BackgroundTransparency = Compkiller.BlockTransparency;
 
 			table.insert(Compkiller.Elements.BlockColor , {
 				Element = Section,
 				Property = "BackgroundColor3"
 			});
+
+			table.insert(Compkiller._BlockTransparencyTargets, Section);
 
 			if Compkiller:_IsMobile() then
 				Compkiller:_AddDragBlacklist(Section);
