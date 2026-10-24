@@ -1982,16 +1982,65 @@ function Compkiller.__CONFIG(config , default)
 	return config;
 end;
 
+-- Enchanted UI: master switch for the cosmetic upgrades -- window/panel
+-- glow border, drop shadows, gradient title and Menu Shine. Each piece
+-- registers a setter here; SetEnchantedUI flips them all at once.
+Compkiller.EnchantedUI = true;
+Compkiller._EnchantedTargets = {};
+
+function Compkiller:_AddEnchanted(Apply: (boolean) -> ())
+	table.insert(Compkiller._EnchantedTargets, Apply);
+
+	pcall(Apply, Compkiller.EnchantedUI ~= false);
+end;
+
 -- Menu Shine: a soft white band that sweeps across accent-filled elements
 -- (toggle pills while ON, slider fills, buttons, the tab selection bar).
--- Each target gets a child overlay with its own UIGradient whose Offset is
--- driven by an infinitely-repeating engine tween, so there's no per-frame
--- Lua cost no matter how many elements carry it. The overlay copies the
--- target's BackgroundTransparency, so it fades in/out with the element.
--- Condition (optional) gates it on top of the global toggle -- e.g. a
--- toggle pill only shines while it's ON.
+-- Each target gets a child overlay with its own UIGradient; ONE shared
+-- Heartbeat driver writes the same Offset to every gradient so all shines
+-- sweep in sync. The overlay copies the target's BackgroundTransparency, so
+-- it fades in/out with the element. Condition (optional) gates it on top of
+-- the global toggles -- e.g. a toggle pill only shines while it's ON.
 Compkiller.MenuShine = true;
 Compkiller._ShineTargets = {};
+Compkiller._ShineGradients = {};
+
+local SHINE_SWEEP, SHINE_PERIOD = 1.4, 3.0;
+
+local function ShineActive()
+	return Compkiller.MenuShine ~= false and Compkiller.EnchantedUI ~= false and not Compkiller.PerformanceMode;
+end;
+
+local function StartShineDriver()
+	if Compkiller._ShineDriver then return; end;
+
+	local LastOffset = nil;
+
+	Compkiller._ShineDriver = RunService.Heartbeat:Connect(function()
+		if not ShineActive() then return; end;
+
+		-- Sweep for SHINE_SWEEP seconds (sine-eased, -1 -> 1), then rest
+		-- off-element until the period wraps.
+		local Phase = os.clock() % SHINE_PERIOD;
+		local Offset = -1;
+
+		if Phase < SHINE_SWEEP then
+			local Alpha = Phase / SHINE_SWEEP;
+
+			Offset = -1 + 2 * (0.5 - 0.5 * math.cos(Alpha * math.pi));
+		end;
+
+		if Offset == LastOffset then return; end;
+
+		LastOffset = Offset;
+
+		local Vector = Vector2.new(Offset, 0);
+
+		for Gradient in next, Compkiller._ShineGradients do
+			Gradient.Offset = Vector;
+		end;
+	end);
+end;
 
 function Compkiller:_AddShine(Target: GuiObject, Condition: (() -> boolean)?) : () -> ()
 	local Shine = Instance.new("Frame")
@@ -2024,20 +2073,17 @@ function Compkiller:_AddShine(Target: GuiObject, Condition: (() -> boolean)?) : 
 	Gradient.Offset = Vector2.new(-1, 0)
 	Gradient.Parent = Shine
 
-	-- Random start delay so every shine on screen doesn't sweep in lockstep.
-	-- DelayTime also applies between repeats, giving a pause between sweeps.
-	task.delay(math.random() * 1.6, function()
-		if Gradient.Parent then
-			TweenService:Create(Gradient, TweenInfo.new(1.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, false, 1.6), {
-				Offset = Vector2.new(1, 0)
-			}):Play();
-		end;
+	Compkiller._ShineGradients[Gradient] = true;
+
+	Shine.Destroying:Connect(function()
+		Compkiller._ShineGradients[Gradient] = nil;
 	end);
+
+	StartShineDriver();
 
 	local Refresh = function()
 		Shine.BackgroundTransparency = Target.BackgroundTransparency;
-		Shine.Visible = Compkiller.MenuShine ~= false
-			and not Compkiller.PerformanceMode
+		Shine.Visible = ShineActive()
 			and Target.BackgroundTransparency < 0.95
 			and (not Condition or Condition() == true);
 	end;
@@ -2057,6 +2103,17 @@ function Compkiller:SetMenuShine(Value: boolean)
 	for _, Refresh in ipairs(Compkiller._ShineTargets) do
 		pcall(Refresh);
 	end;
+end;
+
+function Compkiller:SetEnchantedUI(Value: boolean)
+	Compkiller.EnchantedUI = Value;
+
+	for _, Apply in ipairs(Compkiller._EnchantedTargets) do
+		pcall(Apply, Value);
+	end;
+
+	-- Shine visibility also depends on EnchantedUI.
+	Compkiller:SetMenuShine(Compkiller.MenuShine);
 end;
 
 -- UIGradient.Color is a ColorSequence, which the Compkiller.Elements retheme
@@ -2112,6 +2169,10 @@ function Compkiller:_AddGlowStroke(Target: GuiObject, Thickness: number?) : UISt
 		Rotation = 360
 	}):Play();
 
+	Compkiller:_AddEnchanted(function(On)
+		Stroke.Enabled = On;
+	end);
+
 	return Stroke;
 end;
 
@@ -2134,6 +2195,10 @@ function Compkiller:_AddShadow(Target: GuiObject, Spread: number?) : ImageLabel
 	Shadow.ImageTransparency = 0.45;
 	Shadow.ScaleType = Enum.ScaleType.Slice;
 	Shadow.SliceCenter = Rect.new(49, 49, 450, 450);
+
+	Compkiller:_AddEnchanted(function(On)
+		Shadow.Visible = On;
+	end);
 
 	return Shadow;
 end;
@@ -2158,8 +2223,6 @@ function Compkiller:_CreateFloatingPanel(Parent: Instance, Config)
 	local Header = Instance.new("Frame")
 	local Icon = Instance.new("ImageLabel")
 	local Title = Instance.new("TextLabel")
-	local AccentLine = Instance.new("Frame")
-	local AccentGradient = Instance.new("UIGradient")
 	local ButtonList = Instance.new("Frame")
 	local ButtonLayout = Instance.new("UIListLayout")
 	local Body = Instance.new("Frame")
@@ -2216,26 +2279,6 @@ function Compkiller:_CreateFloatingPanel(Parent: Instance, Config)
 	Title.TextTruncate = Enum.TextTruncate.AtEnd
 
 	table.insert(Compkiller.Elements.SwitchColor, { Element = Title, Property = "TextColor3" });
-
-	AccentLine.Name = Compkiller:_RandomString()
-	AccentLine.Parent = Header
-	AccentLine.AnchorPoint = Vector2.new(0.5, 1)
-	AccentLine.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-	AccentLine.BorderSizePixel = 0
-	AccentLine.Position = UDim2.new(0.5, 0, 1, 0)
-	AccentLine.Size = UDim2.new(1, -16, 0, 1)
-	AccentLine.ZIndex = Z + 2
-
-	AccentGradient.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 1),
-		NumberSequenceKeypoint.new(0.5, 0.2),
-		NumberSequenceKeypoint.new(1, 1),
-	})
-	AccentGradient.Parent = AccentLine
-
-	Compkiller:_BindAccentGradient(AccentGradient, function(Accent)
-		return ColorSequence.new(Accent);
-	end);
 
 	ButtonList.Name = Compkiller:_RandomString()
 	ButtonList.Parent = Header
@@ -8519,6 +8562,10 @@ function Compkiller.new(Config : Window)
 		end);
 
 		TitleGradient.Parent = WindowLabel;
+
+		Compkiller:_AddEnchanted(function(On)
+			TitleGradient.Enabled = On;
+		end);
 	end;
 
 	TabButtons.Name = Compkiller:_RandomString()
@@ -12480,20 +12527,32 @@ function Compkiller.new(Config : Window)
 			end,
 		});
 
-		-- Moving shine across toggles (while ON), slider fills, buttons and
-		-- the tab selection bar. Defaults on via Compkiller.MenuShine, so like
-		-- the other toggles here the callback only needs to run on change.
-		local MenuShineToggle = ControlsSection:AddToggle({
+		-- Enchanted UI: the cosmetic upgrades (glow border, drop shadows,
+		-- gradient title, Menu Shine). Defaults on via Compkiller.EnchantedUI /
+		-- Compkiller.MenuShine, so like the other toggles here the callbacks
+		-- only need to run on change. Menu Shine lives in its gear.
+		local EnchantedToggle = ControlsSection:AddToggle({
+			Name     = "Enchanted UI",
+			Flag     = "UIEnchanted",
+			Default  = Compkiller.EnchantedUI ~= false,
+			Callback = function(v)
+				Compkiller:SetEnchantedUI(v);
+			end,
+		});
+
+		EnchantedToggle.Link:AddHelper({
+			Text = "Glow border, drop shadows, gradient title and Menu Shine. Open the gear for individual options.",
+		});
+
+		local EnchantedOption = EnchantedToggle.Link:AddOption();
+
+		EnchantedOption:AddToggle({
 			Name     = "Menu Shine",
 			Flag     = "UIMenuShine",
 			Default  = Compkiller.MenuShine ~= false,
 			Callback = function(v)
 				Compkiller:SetMenuShine(v);
 			end,
-		});
-
-		MenuShineToggle.Link:AddHelper({
-			Text = "Toggles, sliders and highlights get a moving shine.",
 		});
 
 		local ESPPreviewToggle = ControlsSection:AddToggle({
@@ -12636,7 +12695,18 @@ function Compkiller.new(Config : Window)
 		-- Flag readers. Toggle flags return booleans, color pickers return
 		-- either a Color3 or { ColorPicker = { Color = ... } } depending on
 		-- which picker made them, dropdowns a string.
+		-- A Flags entry is either a flag name or a function returning the
+		-- value directly (for state that isn't a single flag, e.g. one option
+		-- out of a multi-dropdown).
 		local function FlagValue(FlagName)
+			if type(FlagName) == "function" then
+				local Ok, Value = pcall(FlagName);
+
+				if Ok then return Value; end;
+
+				return nil;
+			end;
+
 			local Flag = FlagName and Compkiller.Flags[FlagName];
 
 			if not Flag then return nil; end;
@@ -12673,6 +12743,8 @@ function Compkiller.new(Config : Window)
 
 		local function CurrentBoxStyle()
 			local Value = FlagValue(PreviewConfig.Flags.BoxStyle);
+
+			if type(Value) == "table" then Value = Value[1]; end;
 
 			if type(Value) == "string" then return Value; end;
 
@@ -13274,9 +13346,11 @@ function Compkiller.new(Config : Window)
 
 			-- Box
 			local ShowBox = IsOn("Box");
-			local Corner = CurrentBoxStyle() == "Corner";
+			local Style = CurrentBoxStyle();
+			local Corner = Style == "Corner";
 			local BoxColor = ColorOf("Box");
-			local ShowFill = IsOn("BoxFill");
+			-- "Filled" style = full box + fill, without needing a BoxFill flag.
+			local ShowFill = IsOn("BoxFill") or (ShowBox and Style == "Filled");
 
 			BoxOuter.Visible = ShowBox and not Corner;
 			BoxFrame.Visible = (ShowBox and not Corner) or ShowFill;
@@ -14185,7 +14259,6 @@ function Compkiller.new(Config : Window)
 			local SectionText = Instance.new("TextLabel")
 			local SectionClose = Instance.new("ImageLabel")
 			local SectionDetach = Instance.new("ImageLabel")
-			local SectionAccent = Instance.new("Frame")
 
 			Section.Name = Compkiller:_RandomString()
 			Section.Parent = Parent;
@@ -14218,13 +14291,9 @@ function Compkiller.new(Config : Window)
 			UICorner.CornerRadius = UDim.new(0, 6)
 			UICorner.Parent = Section
 
-			UIStroke.Color = Compkiller.Colors.StrokeColor
-			UIStroke.Parent = Section
-
-			table.insert(Compkiller.Elements.StrokeColor,{
-				Element = UIStroke,
-				Property = "Color"
-			});
+			-- No border stroke on section panels -- the card fill alone
+			-- separates them from the window background.
+			UIStroke:Destroy()
 
 			UIListLayout.Parent = Section
 			UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
@@ -14289,35 +14358,6 @@ function Compkiller.new(Config : Window)
 				Element = SectionDetach,
 				Property = 'ImageColor3'
 			});
-
-			-- Short accent underline beneath the section name.
-			SectionAccent.Name = Compkiller:_RandomString()
-			SectionAccent.Parent = Header
-			SectionAccent.AnchorPoint = Vector2.new(0, 1)
-			SectionAccent.BackgroundColor3 = Compkiller.Colors.Highlight
-			SectionAccent.BorderSizePixel = 0
-			SectionAccent.Position = UDim2.new(0, 12, 1, -3)
-			SectionAccent.Size = UDim2.new(0, 22, 0, 2)
-			SectionAccent.ZIndex = 10
-
-			table.insert(Compkiller.Elements.Highlight , {
-				Element = SectionAccent,
-				Property = 'BackgroundColor3'
-			});
-
-			do
-				local AccentCorner = Instance.new("UICorner");
-				local AccentFade = Instance.new("UIGradient");
-
-				AccentCorner.CornerRadius = UDim.new(1, 0);
-				AccentCorner.Parent = SectionAccent;
-
-				AccentFade.Transparency = NumberSequence.new({
-					NumberSequenceKeypoint.new(0, 0),
-					NumberSequenceKeypoint.new(1, 0.85),
-				});
-				AccentFade.Parent = SectionAccent;
-			end;
 
 			if not SectionText.Text:byte() then
 				Header.Visible = false;
@@ -14443,10 +14483,6 @@ function Compkiller.new(Config : Window)
 			SectionSignal:Connect(function(bool)
 				Compkiller:_Animation(SectionDetach,TweenInfo.new(0.21),{
 					ImageTransparency = (bool and 0.700) or 1
-				})
-
-				Compkiller:_Animation(SectionAccent,TweenInfo.new(0.21),{
-					BackgroundTransparency = (bool and 0) or 1
 				})
 
 				if bool then
