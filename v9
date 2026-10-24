@@ -12550,6 +12550,9 @@ function Compkiller.new(Config : Window)
 			Text = "Shows the live ESP preview panel next to the menu (when the script provides one).",
 		});
 
+		-- Detached-section settings: disabled while the pop-out button is
+		-- (see DrawSection's SectionDetach).
+		--[==[
 		local DetachToggle = ControlsSection:AddToggle({
 			Name     = "Hide Detached With Menu",
 			Flag     = "UIDetachedHideWithMenu",
@@ -12570,6 +12573,7 @@ function Compkiller.new(Config : Window)
 				WindowArgs:DockAll();
 			end,
 		});
+		]==]
 
 		ControlsSection:AddButton({
 			Name     = "Unload Script",
@@ -12608,17 +12612,33 @@ function Compkiller.new(Config : Window)
 	-- ── ESP Preview ─────────────────────────────────────────────────────
 	-- A floating panel with a slowly rotating 3D copy of the local character
 	-- (an R6 dummy if the character can't be cloned) and live 2D ESP drawn
-	-- over it: box (full/corner), box fill, name, distance, tool, health bar,
-	-- tracer, skeleton and chams. The box/skeleton come from projecting the
-	-- model's real part corners through the viewport camera every frame, so
-	-- they hug the model as it turns. Each feature reads its state (and
-	-- color) straight from the consumer's own flags, so the preview mirrors
-	-- the real ESP settings with no extra wiring:
+	-- over it: box (full / corner / filled / 3D), name, distance, tool,
+	-- health + chakra bars, tracer, skeleton, Highlight-style chams (fill +
+	-- outline), plus an optional custom text stack and icon row above the
+	-- head. The box/skeleton come from projecting the model's real part
+	-- corners through the viewport camera every frame, so they hug the model
+	-- as it turns.
+	--
+	-- Every Flags entry is either a flag name or a function(Ctx) returning
+	-- the value, so the preview mirrors the consumer's real ESP settings
+	-- with no extra wiring. Ctx = { Health, Chakra (0-1, animated sample
+	-- values), Distance, Time, Player }.
 	--
 	--   Window:DrawESPPreview({
 	--       Tab   = VisualsTab, -- optional: only shown while this tab is open
 	--       Flags = { Box = "ESPBox", BoxColor = "ESPBoxColor", Name = "ESPName", ... },
+	--       TextStack = function(Ctx) return { { Text = "Name", Color = ... }, ... } end,
+	--       Icons     = function(Ctx) return { { Image = "rbxassetid://..", Size = 20, Text = "5" } } end,
 	--   })
+	--
+	-- Booleans:  Box, BoxFill, Name, Distance, Tool, Health, HealthNumber,
+	--            Chakra, Tracer, Skeleton, Chams
+	-- Colors:    <Feature>Color, plus HealthBarColor, ChamsOutlineColor
+	-- Numbers:   TextSize, BoxThickness, BoxFillTransparency, HealthBarWidth,
+	--            ChakraBarWidth, SkeletonThickness, ChamsTransparency,
+	--            ChamsOutlineTransparency
+	-- Other:     BoxStyle ("Full" | "Corner" | "Filled" | "3D"), Font
+	--            (Enum.Font, an Enum.Font name, or Legacy/System/Plex/Monospace)
 	--
 	-- Features with no flag fall back to Defaults / Preview:Set(...). Docked
 	-- to the right of the main window; dragging its header (or the pin
@@ -12626,6 +12646,16 @@ function Compkiller.new(Config : Window)
 	WindowArgs._ESPPreviews = {};
 
 	function WindowArgs:DrawESPPreview(PreviewConfig)
+		-- Drawing-library font names -> closest Roblox UI fonts.
+		local PREVIEW_FONTS = {
+			Legacy = Enum.Font.Arial,
+			System = Enum.Font.Gotham,
+			Plex = Enum.Font.Ubuntu,
+			Monospace = Enum.Font.Code,
+		};
+
+		local BOX3D_EDGES = { {1,2},{2,4},{4,3},{3,1}, {5,6},{6,8},{8,7},{7,5}, {1,5},{2,6},{3,7},{4,8} };
+
 		PreviewConfig = Compkiller.__CONFIG(PreviewConfig, {
 			Name = "ESP Preview",
 			Tab = nil,
@@ -12633,6 +12663,12 @@ function Compkiller.new(Config : Window)
 			Defaults = {},
 			Width = 240,
 			Height = 320,
+			TextStack = nil,         -- function(Ctx) -> { { Text, Color }, ... } bottom -> top, above the box
+			Icons = nil,             -- function(Ctx) -> { { Image, Size, Color, Text, TextSize }, ... } row above the stack
+			DistanceFormat = "[%dm]",
+			TextScale = 1,           -- multiplier applied to TextSize
+			ModelFill = 0.62,        -- fraction of the stage height the model fills
+			ModelBias = 0,           -- push the model down (+) / up (-), fraction of stage height
 		});
 
 		local Features = {
@@ -12642,6 +12678,8 @@ function Compkiller.new(Config : Window)
 			Distance = true,
 			Tool = true,
 			Health = true,
+			HealthNumber = true,
+			Chakra = false,
 			Tracer = false,
 			Skeleton = false,
 			Chams = false,
@@ -12656,36 +12694,61 @@ function Compkiller.new(Config : Window)
 			Tracer = Compkiller.Colors.Highlight,
 			Skeleton = Color3.fromRGB(255, 255, 255),
 			Chams = Compkiller.Colors.Highlight,
+			ChamsOutline = Color3.fromRGB(255, 255, 255),
+			Chakra = Color3.fromRGB(60, 150, 255),
+		};
+
+		local Values = {
+			TextSize = 11,
+			BoxThickness = 1,
+			BoxFillTransparency = 0.8,
+			HealthBarWidth = 3,
+			ChakraBarWidth = 3,
+			SkeletonThickness = 1.5,
+			ChamsTransparency = 0.5,
+			ChamsOutlineTransparency = 0,
 		};
 
 		local BoxStyle = "Full";
+		local DefaultFont = Enum.Font.GothamBold;
 
 		for Key, Value in next, PreviewConfig.Defaults do
 			if Key == "BoxStyle" then
 				BoxStyle = Value;
 			elseif typeof(Value) == "Color3" then
-				Colors[Key] = Value;
+				Colors[string.gsub(Key, "Color$", "")] = Value;
+			elseif typeof(Value) == "EnumItem" then
+				DefaultFont = Value;
+			elseif type(Value) == "number" then
+				Values[Key] = Value;
 			else
 				Features[Key] = Value == true;
 			end;
 		end;
 
+		-- Sample state handed to every function-valued flag, refreshed each
+		-- frame (fake health/chakra so bars and low-HP colors visibly move).
+		local Ctx = {
+			Health = 1,
+			Chakra = 1,
+			Distance = 24,
+			Time = 0,
+			Player = LocalPlayer,
+		};
+
 		-- Flag readers. Toggle flags return booleans, color pickers return
 		-- either a Color3 or { ColorPicker = { Color = ... } } depending on
 		-- which picker made them, dropdowns a string.
-		-- A Flags entry is either a flag name or a function returning the
-		-- value directly (for state that isn't a single flag, e.g. one option
-		-- out of a multi-dropdown).
-		local function FlagValue(FlagName)
-			if type(FlagName) == "function" then
-				local Ok, Value = pcall(FlagName);
+		local function FlagValue(Spec)
+			if type(Spec) == "function" then
+				local Ok, Value = pcall(Spec, Ctx);
 
 				if Ok then return Value; end;
 
 				return nil;
 			end;
 
-			local Flag = FlagName and Compkiller.Flags[FlagName];
+			local Flag = Spec and Compkiller.Flags[Spec];
 
 			if not Flag then return nil; end;
 
@@ -12717,6 +12780,26 @@ function Compkiller.new(Config : Window)
 
 		local function ColorOf(Feature)
 			return ReadColor(FlagValue(PreviewConfig.Flags[Feature .. "Color"])) or Colors[Feature];
+		end;
+
+		local function ValueOf(Key)
+			return tonumber(FlagValue(PreviewConfig.Flags[Key])) or Values[Key];
+		end;
+
+		local function FontOf()
+			local Value = FlagValue(PreviewConfig.Flags.Font);
+
+			if typeof(Value) == "EnumItem" then return Value; end;
+
+			if type(Value) == "string" then
+				if PREVIEW_FONTS[Value] then return PREVIEW_FONTS[Value]; end;
+
+				local Ok, Font = pcall(function() return Enum.Font[Value]; end);
+
+				if Ok and Font then return Font; end;
+			end;
+
+			return DefaultFont;
 		end;
 
 		local function CurrentBoxStyle()
@@ -12811,7 +12894,7 @@ function Compkiller.new(Config : Window)
 		Viewport.Parent = Stage
 		Viewport.BackgroundTransparency = 1
 		Viewport.Size = UDim2.fromScale(1, 1)
-		Viewport.ZIndex = Z + 3
+		Viewport.ZIndex = Z + 4
 		Viewport.Ambient = Color3.fromRGB(165, 165, 180)
 		Viewport.LightColor = Color3.fromRGB(255, 255, 255)
 		Viewport.LightDirection = Vector3.new(-0.5, -1, 0.6)
@@ -12822,11 +12905,43 @@ function Compkiller.new(Config : Window)
 
 		WorldModel.Parent = Viewport
 
+		-- Highlight-style outline: four flat-colored silhouette copies of the
+		-- model, each nudged a couple of pixels in one direction BEHIND the
+		-- main viewport. The main render covers their middles, leaving only
+		-- a rim around the character -- the same look as a Highlight outline
+		-- (Highlights themselves don't render inside ViewportFrames).
+		local OUTLINE_OFFSETS = { Vector2.new(-2, 0), Vector2.new(2, 0), Vector2.new(0, -2), Vector2.new(0, 2) };
+		local Silhouettes = {};
+
+		for Index, Offset in ipairs(OUTLINE_OFFSETS) do
+			local Frame = Instance.new("ViewportFrame");
+			local SilCamera = Instance.new("Camera");
+			local SilWorld = Instance.new("WorldModel");
+
+			Frame.Name = Compkiller:_RandomString();
+			Frame.Parent = Stage;
+			Frame.BackgroundTransparency = 1;
+			Frame.Position = UDim2.fromOffset(Offset.X, Offset.Y);
+			Frame.Size = UDim2.fromScale(1, 1);
+			Frame.ZIndex = Z + 3;
+			Frame.Ambient = Color3.fromRGB(255, 255, 255);
+			Frame.LightColor = Color3.fromRGB(0, 0, 0);
+			Frame.Visible = false;
+
+			SilCamera.FieldOfView = Camera.FieldOfView;
+			SilCamera.Parent = Frame;
+			Frame.CurrentCamera = SilCamera;
+
+			SilWorld.Parent = Frame;
+
+			Silhouettes[Index] = { Frame = Frame, Camera = SilCamera, World = SilWorld, Model = nil };
+		end;
+
 		Overlay.Name = Compkiller:_RandomString()
 		Overlay.Parent = Stage
 		Overlay.BackgroundTransparency = 1
 		Overlay.Size = UDim2.fromScale(1, 1)
-		Overlay.ZIndex = Z + 4
+		Overlay.ZIndex = Z + 5
 
 		Hint.Name = Compkiller:_RandomString()
 		Hint.Parent = Stage
@@ -12834,7 +12949,7 @@ function Compkiller.new(Config : Window)
 		Hint.BackgroundTransparency = 1
 		Hint.Position = UDim2.new(0.5, 0, 1, -4)
 		Hint.Size = UDim2.new(1, 0, 0, 12)
-		Hint.ZIndex = Z + 6
+		Hint.ZIndex = Z + 9
 		Hint.Font = Enum.Font.GothamMedium
 		Hint.Text = "drag to rotate"
 		Hint.TextColor3 = Compkiller.Colors.SwitchColor
@@ -12851,7 +12966,7 @@ function Compkiller.new(Config : Window)
 			Frame.Parent = Overlay;
 			Frame.BackgroundColor3 = Color3.fromRGB(255, 255, 255);
 			Frame.BorderSizePixel = 0;
-			Frame.ZIndex = Z + 4 + (ZOffset or 1);
+			Frame.ZIndex = Z + 5 + (ZOffset or 1);
 			Frame.Visible = false;
 
 			return Frame;
@@ -12888,67 +13003,120 @@ function Compkiller.new(Config : Window)
 			Line.Visible = true;
 		end;
 
-		local function NewText(Size)
+		local function NewText()
 			local Label = Instance.new("TextLabel");
 
 			Label.Name = Compkiller:_RandomString();
 			Label.Parent = Overlay;
 			Label.BackgroundTransparency = 1;
-			Label.Size = UDim2.fromOffset(200, 14);
-			Label.ZIndex = Z + 7;
+			Label.Size = UDim2.fromOffset(240, 14);
+			Label.ZIndex = Z + 9;
 			Label.Font = Enum.Font.GothamBold;
-			Label.TextSize = Size or 11;
+			Label.TextSize = 11;
 			Label.TextStrokeTransparency = 0.35;
 			Label.Visible = false;
 
 			return Label;
 		end;
 
-		-- Full box: colored 1px stroke over a thicker dark one.
+		-- Full box: colored stroke over a thicker dark one.
 		local BoxOuter = NewFrame(1);
 		local BoxFrame = NewFrame(2);
 
 		BoxOuter.BackgroundTransparency = 1;
 		BoxFrame.BackgroundTransparency = 1;
 
-		NewOutline(BoxOuter, 3);
-
+		local BoxOuterStroke = NewOutline(BoxOuter, 3);
 		local BoxStroke = NewOutline(BoxFrame, 1);
 
 		BoxStroke.Transparency = 0;
 
-		-- Corner box: 8 short lines.
-		local CornerLines = {};
+		-- Corner (8) / 3D (12) box edges.
+		local BoxLines = {};
 
-		for Index = 1, 8 do
-			CornerLines[Index] = NewLine();
+		for Index = 1, 12 do
+			BoxLines[Index] = NewLine();
 		end;
 
-		local HealthBack = NewFrame(1);
-		local HealthFill = Instance.new("Frame");
-		local HealthText = NewText(9);
+		local function NewBar()
+			local Back = NewFrame(1);
+			local Fill = Instance.new("Frame");
 
-		HealthBack.BackgroundColor3 = Color3.fromRGB(0, 0, 0);
-		HealthBack.BackgroundTransparency = 0.3;
+			Back.BackgroundColor3 = Color3.fromRGB(40, 40, 40);
+			Back.BackgroundTransparency = 0.15;
 
-		HealthFill.Name = Compkiller:_RandomString();
-		HealthFill.Parent = HealthBack;
-		HealthFill.AnchorPoint = Vector2.new(0, 1);
-		HealthFill.BorderSizePixel = 0;
-		HealthFill.Position = UDim2.new(0, 1, 1, -1);
-		HealthFill.ZIndex = HealthBack.ZIndex + 1;
+			NewOutline(Back, 1);
+
+			Fill.Name = Compkiller:_RandomString();
+			Fill.Parent = Back;
+			Fill.AnchorPoint = Vector2.new(0, 1);
+			Fill.BorderSizePixel = 0;
+			Fill.Position = UDim2.fromScale(0, 1);
+			Fill.ZIndex = Back.ZIndex + 1;
+
+			return Back, Fill;
+		end;
+
+		local HealthBack, HealthFill = NewBar();
+		local ChakraBack, ChakraFill = NewBar();
+		local HealthText = NewText();
 
 		HealthText.Size = UDim2.fromOffset(24, 10);
 		HealthText.TextXAlignment = Enum.TextXAlignment.Right;
 
-		local NameText = NewText(12);
-		local DistanceText = NewText(10);
-		local ToolText = NewText(10);
+		local NameText = NewText();
+		local DistanceText = NewText();
+		local ToolText = NewText();
 		local TracerLine = NewLine();
 
 		NameText.AnchorPoint = Vector2.new(0.5, 1);
 		DistanceText.AnchorPoint = Vector2.new(0.5, 0);
 		ToolText.AnchorPoint = Vector2.new(0.5, 0);
+
+		-- Pools for the consumer's TextStack lines and Icons row.
+		local StackLabels = {};
+		local IconFrames = {};
+
+		local function StackLabel(Index)
+			local Label = StackLabels[Index];
+
+			if not Label then
+				Label = NewText();
+				Label.AnchorPoint = Vector2.new(0.5, 1);
+				StackLabels[Index] = Label;
+			end;
+
+			return Label;
+		end;
+
+		local function IconFrame(Index)
+			local Entry = IconFrames[Index];
+
+			if not Entry then
+				local Image = Instance.new("ImageLabel");
+				local Text = Instance.new("TextLabel");
+
+				Image.Name = Compkiller:_RandomString();
+				Image.Parent = Overlay;
+				Image.BackgroundTransparency = 1;
+				Image.ZIndex = Z + 9;
+				Image.Visible = false;
+
+				Text.Name = Compkiller:_RandomString();
+				Text.Parent = Image;
+				Text.BackgroundTransparency = 1;
+				Text.Size = UDim2.fromScale(1, 1);
+				Text.ZIndex = Z + 10;
+				Text.Font = Enum.Font.GothamBold;
+				Text.TextColor3 = Color3.fromRGB(255, 255, 255);
+				Text.TextStrokeTransparency = 0.35;
+
+				Entry = { Image = Image, Text = Text };
+				IconFrames[Index] = Entry;
+			end;
+
+			return Entry;
+		end;
 
 		-- ── Model ──
 		local Model = nil;
@@ -12956,10 +13124,11 @@ function Compkiller.new(Config : Window)
 		local Center = Vector3.zero;
 		local Extents = Vector3.new(4, 5, 1);
 		local BoxParts = {};
+		local ChamsSource = {};
 		local Bones = {};
 		local BoneLines = {};
 		local ToolName = "Fists";
-		local Chams = { Applied = false, Color = nil, Saved = {} };
+		local Chams = { Shell = nil, Outline = false };
 
 		local CORNERS = {};
 
@@ -13131,90 +13300,153 @@ function Compkiller.new(Config : Window)
 			local Aspect = (Size.X > 1 and Size.Y > 1 and Size.X / Size.Y) or ((PreviewConfig.Width - 12) / PreviewConfig.Height);
 			local HalfTan = math.tan(math.rad(Camera.FieldOfView) / 2);
 			local Width = math.max(Extents.X, Extents.Z);
+			local Fill = PreviewConfig.ModelFill;
 
-			-- Model fills ~62% of the stage height, leaving room above/below
-			-- for the name, distance and tool labels.
-			local Distance = math.max(Extents.Y / (2 * 0.62 * HalfTan), Width / (2 * 0.62 * HalfTan * Aspect)) + Width / 2;
+			-- Model fills `Fill` of the stage height, leaving room above/below
+			-- for the text stack, distance and tool labels.
+			local Distance = math.max(Extents.Y / (2 * Fill * HalfTan), Width / (2 * Fill * HalfTan * Aspect)) + Width / 2;
 
-			Camera.CFrame = CFrame.lookAt(Vector3.new(0, Extents.Y * 0.12, -Distance), Vector3.new(0, 0, 0));
+			-- Raising camera + target together slides the model down the
+			-- stage by ModelBias of its height (room for a tall text stack).
+			local Lift = PreviewConfig.ModelBias * 2 * Distance * HalfTan;
+
+			Camera.CFrame = CFrame.lookAt(Vector3.new(0, Extents.Y * 0.12 + Lift, -Distance), Vector3.new(0, Lift, 0));
+
+			for _, Sil in ipairs(Silhouettes) do
+				Sil.Camera.CFrame = Camera.CFrame;
+			end;
 		end;
 
-		local function RestoreChams()
-			for _, Entry in ipairs(Chams.Saved) do
-				pcall(function()
-					local Object = Entry.Object;
+		-- Flat copies of every visible part (no textures/decals/children
+		-- except a SpecialMesh for shape), parented to Parent. Used for the
+		-- chams fill shell and the outline silhouettes.
+		local function FlatCopy(Parent, Color: Color3, Grow: number)
+			local Copies = {};
 
-					if Entry.Kind == "Part" then
-						Object.Color = Entry.Color;
-						Object.Material = Entry.Material;
+			for _, Source in ipairs(ChamsSource) do
+				local Ok, Copy = pcall(function()
+					local Archivable = Source.Archivable;
 
-						if Entry.TextureID then Object.TextureID = Entry.TextureID; end;
-					elseif Entry.Kind == "Transparency" then
-						Object.Transparency = Entry.Value;
-					elseif Entry.Kind == "MeshTexture" then
-						Object.TextureId = Entry.Value;
-					elseif Entry.Kind == "Parent" then
-						Object.Parent = Entry.Value;
-					end;
+					Source.Archivable = true;
+
+					local Clone = Source:Clone();
+
+					Source.Archivable = Archivable;
+
+					return Clone;
 				end);
+
+				if Ok and Copy then
+					for _, Child in ipairs(Copy:GetChildren()) do
+						if Child:IsA("SpecialMesh") then
+							Child.TextureId = "";
+							Child.Scale = Child.Scale * Grow;
+						else
+							Child:Destroy();
+						end;
+					end;
+
+					if Copy:IsA("MeshPart") then
+						pcall(function() Copy.TextureID = ""; end);
+					end;
+
+					if not Copy:FindFirstChildOfClass("SpecialMesh") then
+						Copy.Size = Copy.Size * Grow;
+					end;
+
+					-- Renamed so name lookups on the model (bones, body parts)
+					-- never pick up a shell copy instead of the real part.
+					Copy.Name = "ChamsCopy";
+					Copy.Color = Color;
+					Copy.Material = Enum.Material.SmoothPlastic;
+					Copy.CastShadow = false;
+					Copy.Anchored = true;
+					Copy.CanCollide = false;
+					Copy.Parent = Parent;
+
+					table.insert(Copies, Copy);
+				end;
 			end;
 
-			Chams.Saved = {};
-			Chams.Applied = false;
-			Chams.Color = nil;
+			return Copies;
 		end;
 
-		local function ApplyChams(Color: Color3)
-			if not Chams.Applied then
-				Chams.Saved = {};
-
-				for _, Object in ipairs(Model:GetDescendants()) do
-					if Object:IsA("BasePart") then
-						if Object.Name ~= "HumanoidRootPart" then
-							local Entry = { Kind = "Part", Object = Object, Color = Object.Color, Material = Object.Material };
-
-							if Object:IsA("MeshPart") then
-								Entry.TextureID = Object.TextureID;
-								pcall(function() Object.TextureID = ""; end);
-							end;
-
-							Object.Material = Enum.Material.Neon;
-
-							table.insert(Chams.Saved, Entry);
-						end;
-					elseif Object:IsA("Decal") then
-						table.insert(Chams.Saved, { Kind = "Transparency", Object = Object, Value = Object.Transparency });
-						Object.Transparency = 1;
-					elseif Object:IsA("SpecialMesh") then
-						table.insert(Chams.Saved, { Kind = "MeshTexture", Object = Object, Value = Object.TextureId });
-						Object.TextureId = "";
-					elseif Object:IsA("Clothing") or Object:IsA("ShirtGraphic") or Object:IsA("SurfaceAppearance") then
-						table.insert(Chams.Saved, { Kind = "Parent", Object = Object, Value = Object.Parent });
-					end;
+		local function ClearChams()
+			if Chams.Shell then
+				for _, Part in ipairs(Chams.Shell) do
+					Part:Destroy();
 				end;
 
-				-- Reparent after the walk so GetDescendants' snapshot stays valid.
-				for _, Entry in ipairs(Chams.Saved) do
-					if Entry.Kind == "Parent" then
-						Entry.Object.Parent = nil;
-					end;
-				end;
-
-				Chams.Applied = true;
+				Chams.Shell = nil;
 			end;
 
-			if Chams.Color ~= Color then
-				Chams.Color = Color;
+			for _, Sil in ipairs(Silhouettes) do
+				if Sil.Model then
+					Sil.Model:Destroy();
+					Sil.Model = nil;
+				end;
 
-				for _, Entry in ipairs(Chams.Saved) do
-					if Entry.Kind == "Part" then
-						Entry.Object.Color = Color;
-					end;
+				Sil.Frame.Visible = false;
+			end;
+
+			Chams.Outline = false;
+		end;
+
+		local function UpdateChams(On: boolean)
+			if not On then
+				if Chams.Shell or Chams.Outline then ClearChams(); end;
+
+				return;
+			end;
+
+			-- Fill: a slightly grown, flat-colored shell over the model,
+			-- parented INTO the model so it spins with it.
+			local FillColor = ColorOf("Chams");
+			local FillTransparency = math.clamp(ValueOf("ChamsTransparency"), 0, 1);
+
+			if not Chams.Shell then
+				Chams.Shell = FlatCopy(Model, FillColor, 1.03);
+			end;
+
+			for _, Part in ipairs(Chams.Shell) do
+				Part.Color = FillColor;
+				Part.Transparency = (FillTransparency >= 0.99 and 1) or FillTransparency;
+			end;
+
+			-- Outline: silhouettes behind the main viewport.
+			local OutlineTransparency = math.clamp(ValueOf("ChamsOutlineTransparency"), 0, 1);
+			local ShowOutline = OutlineTransparency < 0.99;
+
+			if ShowOutline and not Chams.Outline then
+				for _, Sil in ipairs(Silhouettes) do
+					local SilModel = Instance.new("Model");
+
+					FlatCopy(SilModel, Color3.fromRGB(255, 255, 255), 1);
+
+					SilModel.WorldPivot = Model:GetPivot();
+					SilModel.Parent = Sil.World;
+					Sil.Model = SilModel;
+				end;
+
+				Chams.Outline = true;
+			end;
+
+			local OutlineColor = ColorOf("ChamsOutline");
+
+			for _, Sil in ipairs(Silhouettes) do
+				Sil.Frame.Visible = ShowOutline;
+
+				if ShowOutline and Sil.Model then
+					Sil.Frame.ImageColor3 = OutlineColor;
+					Sil.Frame.ImageTransparency = OutlineTransparency;
+					Sil.Model:PivotTo(Model:GetPivot());
 				end;
 			end;
 		end;
 
 		local function Setup()
+			ClearChams();
+
 			if Model then
 				Model:Destroy();
 			end;
@@ -13222,8 +13454,6 @@ function Compkiller.new(Config : Window)
 			if Floor then
 				Floor:Destroy();
 			end;
-
-			Chams = { Applied = false, Color = nil, Saved = {} };
 
 			Model = CloneCharacter() or BuildDummy();
 			Model.Parent = WorldModel;
@@ -13233,6 +13463,15 @@ function Compkiller.new(Config : Window)
 
 			Center = BoundsCFrame.Position;
 			Extents = BoundsSize;
+
+			-- Every visible part (chams cover the whole character, extras too).
+			ChamsSource = {};
+
+			for _, Object in ipairs(Model:GetDescendants()) do
+				if Object:IsA("BasePart") and Object.Name ~= "HumanoidRootPart" and Object.Transparency < 1 then
+					table.insert(ChamsSource, Object);
+				end;
+			end;
 
 			-- Box hugs the actual body only. Game-specific extras (swords,
 			-- tails, capes welded on as plain parts, not Accessories) would
@@ -13327,6 +13566,13 @@ function Compkiller.new(Config : Window)
 
 			if Size.X < 2 or Size.Y < 2 then return; end;
 
+			local Now = os.clock();
+
+			Ctx.Time = Now;
+			Ctx.Health = 0.62 + 0.33 * math.sin(Now * 0.9);
+			Ctx.Chakra = 0.55 + 0.4 * math.sin(Now * 0.6 + 1);
+			Ctx.Distance = math.floor(24 + 6 * math.sin(Now * 0.5));
+
 			local CameraCFrame = Camera.CFrame;
 			local HalfTan = math.tan(math.rad(Camera.FieldOfView) / 2);
 			local Aspect = Size.X / Size.Y;
@@ -13363,16 +13609,23 @@ function Compkiller.new(Config : Window)
 			local BoxW, BoxH = MaxX - MinX, MaxY - MinY;
 			local CenterX = (MinX + MaxX) / 2;
 
+			local Font = FontOf();
+			local TextSize = math.clamp(math.floor(ValueOf("TextSize") * PreviewConfig.TextScale + 0.5), 7, 22);
+			local LineHeight = TextSize + 2;
+
 			-- Box
 			local ShowBox = IsOn("Box");
 			local Style = CurrentBoxStyle();
 			local Corner = Style == "Corner";
+			local Box3D = Style == "3D";
+			local Flat = ShowBox and not Corner and not Box3D;
 			local BoxColor = ColorOf("Box");
+			local Thickness = math.max(ValueOf("BoxThickness"), 1);
 			-- "Filled" style = full box + fill, without needing a BoxFill flag.
-			local ShowFill = IsOn("BoxFill") or (ShowBox and Style == "Filled");
+			local ShowFill = (IsOn("BoxFill") or (ShowBox and Style == "Filled")) and not Box3D;
 
-			BoxOuter.Visible = ShowBox and not Corner;
-			BoxFrame.Visible = (ShowBox and not Corner) or ShowFill;
+			BoxOuter.Visible = Flat;
+			BoxFrame.Visible = Flat or ShowFill;
 
 			BoxOuter.Position = UDim2.fromOffset(MinX, MinY);
 			BoxOuter.Size = UDim2.fromOffset(BoxW, BoxH);
@@ -13380,72 +13633,216 @@ function Compkiller.new(Config : Window)
 			BoxFrame.Size = UDim2.fromOffset(BoxW, BoxH);
 
 			BoxStroke.Color = BoxColor;
-			BoxStroke.Transparency = (ShowBox and not Corner and 0) or 1;
+			BoxStroke.Thickness = Thickness;
+			BoxStroke.Transparency = (Flat and 0) or 1;
+			BoxOuterStroke.Thickness = Thickness + 2;
 			BoxFrame.BackgroundColor3 = ColorOf("BoxFill");
-			BoxFrame.BackgroundTransparency = (ShowFill and 0.8) or 1;
+			BoxFrame.BackgroundTransparency = (ShowFill and math.clamp(ValueOf("BoxFillTransparency"), 0, 1)) or 1;
+
+			local LinesUsed = 0;
 
 			if ShowBox and Corner then
-				local Arm = math.floor(math.min(BoxW, BoxH) * 0.25);
+				local ArmX, ArmY = math.floor(BoxW * 0.25), math.floor(BoxH * 0.25);
 				local TL, TR = Vector2.new(MinX, MinY), Vector2.new(MaxX, MinY);
 				local BL, BR = Vector2.new(MinX, MaxY), Vector2.new(MaxX, MaxY);
 				local Segments = {
-					{ TL, TL + Vector2.new(Arm, 0) }, { TL, TL + Vector2.new(0, Arm) },
-					{ TR, TR - Vector2.new(Arm, 0) }, { TR, TR + Vector2.new(0, Arm) },
-					{ BL, BL + Vector2.new(Arm, 0) }, { BL, BL - Vector2.new(0, Arm) },
-					{ BR, BR - Vector2.new(Arm, 0) }, { BR, BR - Vector2.new(0, Arm) },
+					{ TL, TL + Vector2.new(ArmX, 0) }, { TL, TL + Vector2.new(0, ArmY) },
+					{ TR, TR - Vector2.new(ArmX, 0) }, { TR, TR + Vector2.new(0, ArmY) },
+					{ BL, BL + Vector2.new(ArmX, 0) }, { BL, BL - Vector2.new(0, ArmY) },
+					{ BR, BR - Vector2.new(ArmX, 0) }, { BR, BR - Vector2.new(0, ArmY) },
 				};
 
 				for Index, Segment in ipairs(Segments) do
-					CornerLines[Index].BackgroundColor3 = BoxColor;
-					PlaceLine(CornerLines[Index], Segment[1], Segment[2], 1);
+					BoxLines[Index].BackgroundColor3 = BoxColor;
+					PlaceLine(BoxLines[Index], Segment[1], Segment[2], Thickness);
 				end;
-			else
-				for _, Line in ipairs(CornerLines) do
-					Line.Visible = false;
+
+				LinesUsed = 8;
+			elseif ShowBox and Box3D then
+				-- Body-sized box that turns with the model.
+				local Rotation = CFrame.Angles(0, Yaw, 0);
+				local Half = Extents / 2 * 1.05;
+				local Points = {};
+
+				for _, SY in ipairs({ 1, -1 }) do
+					for _, SX in ipairs({ -1, 1 }) do
+						for _, SZ in ipairs({ -1, 1 }) do
+							table.insert(Points, Project(Rotation * Vector3.new(SX * Half.X, SY * Half.Y, SZ * Half.Z)));
+						end;
+					end;
 				end;
+
+				for Index, Edge in ipairs(BOX3D_EDGES) do
+					BoxLines[Index].BackgroundColor3 = BoxColor;
+					PlaceLine(BoxLines[Index], Points[Edge[1]], Points[Edge[2]], Thickness);
+				end;
+
+				LinesUsed = 12;
 			end;
 
-			-- Health bar (fake health so the bar visibly moves)
+			for Index = LinesUsed + 1, #BoxLines do
+				BoxLines[Index].Visible = false;
+			end;
+
+			-- Health bar (left of the box)
 			local ShowHealth = IsOn("Health");
-			local Health = 0.62 + 0.33 * math.sin(os.clock() * 0.9);
+			local Health = Ctx.Health;
 
 			HealthBack.Visible = ShowHealth;
-			HealthText.Visible = ShowHealth;
+			HealthText.Visible = ShowHealth and IsOn("HealthNumber");
 
 			if ShowHealth then
-				HealthBack.Position = UDim2.fromOffset(MinX - 7, MinY - 1);
-				HealthBack.Size = UDim2.fromOffset(4, BoxH + 2);
+				local Width = math.max(ValueOf("HealthBarWidth"), 1);
+				local BarColor = ReadColor(FlagValue(PreviewConfig.Flags.HealthBarColor))
+					or Color3.fromRGB(255, 70, 70):Lerp(Color3.fromRGB(90, 255, 130), Health);
 
-				HealthFill.Size = UDim2.new(1, -2, Health, -2);
-				HealthFill.BackgroundColor3 = Color3.fromRGB(255, 70, 70):Lerp(Color3.fromRGB(90, 255, 130), Health);
+				HealthBack.Position = UDim2.fromOffset(MinX - Width - 3, MinY);
+				HealthBack.Size = UDim2.fromOffset(Width, BoxH);
 
-				HealthText.Text = tostring(math.floor(Health * 100));
-				HealthText.TextColor3 = HealthFill.BackgroundColor3;
-				HealthText.Position = UDim2.fromOffset(MinX - 34, MinY + BoxH * (1 - Health) - 5);
+				HealthFill.Size = UDim2.fromScale(1, Health);
+				HealthFill.BackgroundColor3 = BarColor;
+
+				if HealthText.Visible then
+					HealthText.Text = tostring(math.floor(Health * 100));
+					HealthText.TextColor3 = BarColor;
+					HealthText.Font = Font;
+					HealthText.TextSize = math.max(TextSize - 2, 7);
+					HealthText.Position = UDim2.fromOffset(MinX - Width - 30, MinY + BoxH * (1 - Health) - 5);
+				end;
 			end;
 
-			-- Labels
-			NameText.Visible = IsOn("Name");
-			NameText.Text = LocalPlayer.DisplayName;
-			NameText.TextColor3 = ColorOf("Name");
-			NameText.Position = UDim2.fromOffset(CenterX, MinY - 3);
+			-- Chakra bar (right of the box)
+			local ShowChakra = IsOn("Chakra");
 
+			ChakraBack.Visible = ShowChakra;
+
+			if ShowChakra then
+				local Width = math.max(ValueOf("ChakraBarWidth"), 1);
+
+				ChakraBack.Position = UDim2.fromOffset(MaxX + 3, MinY);
+				ChakraBack.Size = UDim2.fromOffset(Width, BoxH);
+
+				ChakraFill.Size = UDim2.fromScale(1, Ctx.Chakra);
+				ChakraFill.BackgroundColor3 = ColorOf("Chakra");
+			end;
+
+			-- Text stack above the box: built-in Name first, then the
+			-- consumer's TextStack lines, bottom -> top.
+			local StackY = MinY - 2;
+
+			NameText.Visible = IsOn("Name");
+
+			if NameText.Visible then
+				NameText.Text = LocalPlayer.DisplayName;
+				NameText.TextColor3 = ColorOf("Name");
+				NameText.Font = Font;
+				NameText.TextSize = TextSize;
+				NameText.Size = UDim2.fromOffset(240, LineHeight);
+				NameText.Position = UDim2.fromOffset(CenterX, StackY);
+
+				StackY -= LineHeight;
+			end;
+
+			local StackUsed = 0;
+
+			if PreviewConfig.TextStack then
+				local Ok, Lines = pcall(PreviewConfig.TextStack, Ctx);
+
+				if Ok and type(Lines) == "table" then
+					for _, Line in ipairs(Lines) do
+						StackUsed += 1;
+
+						local Label = StackLabel(StackUsed);
+
+						Label.Text = tostring(Line.Text or "");
+						Label.TextColor3 = ReadColor(Line.Color) or Color3.fromRGB(255, 255, 255);
+						Label.Font = Font;
+						Label.TextSize = TextSize;
+						Label.Size = UDim2.fromOffset(240, LineHeight);
+						Label.Position = UDim2.fromOffset(CenterX, StackY);
+						Label.Visible = true;
+
+						StackY -= LineHeight;
+					end;
+				end;
+			end;
+
+			for Index = StackUsed + 1, #StackLabels do
+				StackLabels[Index].Visible = false;
+			end;
+
+			-- Icon row above the stack, centered, bottom-aligned.
+			local IconsUsed = 0;
+
+			if PreviewConfig.Icons then
+				local Ok, Icons = pcall(PreviewConfig.Icons, Ctx);
+
+				if Ok and type(Icons) == "table" and #Icons > 0 then
+					local Gap = 3;
+					local TotalW, MaxH = 0, 0;
+
+					for Index, Icon in ipairs(Icons) do
+						local IconSize = tonumber(Icon.Size) or 18;
+
+						TotalW += IconSize + ((Index > 1 and Gap) or 0);
+						MaxH = math.max(MaxH, IconSize);
+					end;
+
+					local X = CenterX - TotalW / 2;
+					local Bottom = StackY - 2;
+
+					for _, Icon in ipairs(Icons) do
+						local IconSize = tonumber(Icon.Size) or 18;
+
+						IconsUsed += 1;
+
+						local Entry = IconFrame(IconsUsed);
+
+						Entry.Image.Image = tostring(Icon.Image or "");
+						Entry.Image.ImageColor3 = ReadColor(Icon.Color) or Color3.fromRGB(255, 255, 255);
+						Entry.Image.Size = UDim2.fromOffset(IconSize, IconSize);
+						Entry.Image.Position = UDim2.fromOffset(X, Bottom - IconSize);
+						Entry.Image.Visible = true;
+
+						Entry.Text.Text = tostring(Icon.Text or "");
+						Entry.Text.TextSize = tonumber(Icon.TextSize) or math.max(7, math.floor(IconSize * 0.45));
+						Entry.Text.Position = UDim2.fromScale(0, tonumber(Icon.TextOffset) or 0);
+
+						X += IconSize + Gap;
+					end;
+				end;
+			end;
+
+			for Index = IconsUsed + 1, #IconFrames do
+				IconFrames[Index].Image.Visible = false;
+			end;
+
+			-- Below the box
 			local BelowY = MaxY + 3;
 
 			DistanceText.Visible = IsOn("Distance");
 
 			if DistanceText.Visible then
-				DistanceText.Text = "[" .. tostring(math.floor(24 + 6 * math.sin(os.clock() * 0.5))) .. "m]";
+				DistanceText.Text = string.format(PreviewConfig.DistanceFormat, Ctx.Distance);
 				DistanceText.TextColor3 = ColorOf("Distance");
+				DistanceText.Font = Font;
+				DistanceText.TextSize = TextSize;
+				DistanceText.Size = UDim2.fromOffset(240, LineHeight);
 				DistanceText.Position = UDim2.fromOffset(CenterX, BelowY);
 
-				BelowY += 12;
+				BelowY += LineHeight;
 			end;
 
 			ToolText.Visible = IsOn("Tool");
-			ToolText.Text = ToolName;
-			ToolText.TextColor3 = ColorOf("Tool");
-			ToolText.Position = UDim2.fromOffset(CenterX, BelowY);
+
+			if ToolText.Visible then
+				ToolText.Text = ToolName;
+				ToolText.TextColor3 = ColorOf("Tool");
+				ToolText.Font = Font;
+				ToolText.TextSize = TextSize;
+				ToolText.Size = UDim2.fromOffset(240, LineHeight);
+				ToolText.Position = UDim2.fromOffset(CenterX, BelowY);
+			end;
 
 			-- Tracer: bottom-center of the stage to the box's bottom edge.
 			if IsOn("Tracer") then
@@ -13458,24 +13855,21 @@ function Compkiller.new(Config : Window)
 			-- Skeleton
 			local ShowSkeleton = IsOn("Skeleton");
 			local SkeletonColor = ColorOf("Skeleton");
+			local SkeletonThickness = ValueOf("SkeletonThickness");
 
 			for Index, Bone in ipairs(Bones) do
 				local Line = BoneLines[Index];
 
 				if ShowSkeleton then
 					Line.BackgroundColor3 = SkeletonColor;
-					PlaceLine(Line, Project(Bone[1]()), Project(Bone[2]()), 1.5);
+					PlaceLine(Line, Project(Bone[1]()), Project(Bone[2]()), SkeletonThickness);
 				else
 					Line.Visible = false;
 				end;
 			end;
 
-			-- Chams
-			if IsOn("Chams") then
-				ApplyChams(ColorOf("Chams"));
-			elseif Chams.Applied then
-				RestoreChams();
-			end;
+			-- Chams (fill shell + outline silhouettes)
+			UpdateChams(IsOn("Chams"));
 		end;
 
 		-- ── Visibility / docking ──
@@ -13610,12 +14004,16 @@ function Compkiller.new(Config : Window)
 		};
 
 		-- Set("Box", true) / Set("BoxColor", Color3) / Set("BoxStyle", "Corner")
-		-- for features not bound to a flag.
+		-- / Set("TextSize", 12) for features not bound to a flag.
 		function Preview:Set(Feature: string, Value)
 			if Feature == "BoxStyle" then
 				BoxStyle = Value;
 			elseif typeof(Value) == "Color3" then
 				Colors[string.gsub(Feature, "Color$", "")] = Value;
+			elseif typeof(Value) == "EnumItem" then
+				DefaultFont = Value;
+			elseif type(Value) == "number" then
+				Values[Feature] = Value;
 			else
 				Features[Feature] = Value == true;
 			end;
@@ -14328,20 +14726,45 @@ function Compkiller.new(Config : Window)
 			Header.Size = UDim2.new(1, 0, 0, 35)
 			Header.ZIndex = 9
 
+			-- Title bar: an inset, slightly lighter strip behind the section
+			-- name so each group reads as its own labelled panel at a glance
+			-- (no border/accent needed). Uses BlockBackground, the
+			-- "distinct layer" theme color, so it follows every theme.
+			local HeaderBar = Instance.new("Frame")
+			local HeaderBarCorner = Instance.new("UICorner")
+
+			HeaderBar.Name = Compkiller:_RandomString()
+			HeaderBar.Parent = Header
+			HeaderBar.AnchorPoint = Vector2.new(0.5, 0)
+			HeaderBar.BackgroundColor3 = Compkiller.Colors.BlockBackground
+			HeaderBar.BackgroundTransparency = 0
+			HeaderBar.BorderSizePixel = 0
+			HeaderBar.Position = UDim2.new(0.5, 0, 0, 4)
+			HeaderBar.Size = UDim2.new(1, -8, 1, -6)
+			HeaderBar.ZIndex = 9
+
+			table.insert(Compkiller.Elements.BlockBackground , {
+				Element = HeaderBar,
+				Property = 'BackgroundColor3'
+			});
+
+			HeaderBarCorner.CornerRadius = UDim.new(0, 5)
+			HeaderBarCorner.Parent = HeaderBar
+
 			SectionText.Name = Compkiller:_RandomString()
 			SectionText.Parent = Header
 			SectionText.AnchorPoint = Vector2.new(0, 0.5)
 			SectionText.BackgroundTransparency = 1.000
 			SectionText.BorderColor3 = Color3.fromRGB(0, 0, 0)
 			SectionText.BorderSizePixel = 0
-			SectionText.Position = UDim2.new(0, 12, 0.5, 0)
+			SectionText.Position = UDim2.new(0, 14, 0.5, 1)
 			SectionText.Size = UDim2.new(0, 200, 0, 25)
 			SectionText.ZIndex = 10
-			SectionText.Font = Enum.Font.GothamMedium
+			SectionText.Font = Enum.Font.GothamBold
 			SectionText.Text = config.Name;
 			SectionText.TextColor3 = Compkiller.Colors.SwitchColor
 			SectionText.TextSize = 14.000
-			SectionText.TextTransparency = 0.500
+			SectionText.TextTransparency = 0.150
 			SectionText.TextXAlignment = Enum.TextXAlignment.Left
 
 			table.insert(Compkiller.Elements.SwitchColor , {
@@ -14355,14 +14778,18 @@ function Compkiller.new(Config : Window)
 			SectionClose.BackgroundTransparency = 1.000
 			SectionClose.BorderColor3 = Color3.fromRGB(0, 0, 0)
 			SectionClose.BorderSizePixel = 0
-			SectionClose.Position = UDim2.new(1, -12, 0.5, 0)
+			SectionClose.Position = UDim2.new(1, -14, 0.5, 1)
 			SectionClose.Size = UDim2.new(0, 17, 0, 17)
 			SectionClose.ZIndex = 10
 			SectionClose.Image = Compkiller:CacheImage("rbxassetid://109535175596957")
 			SectionClose.ImageTransparency = 0.500
 
+			-- Pop-out (detach) button disabled: never parented, so it's not
+			-- shown or clickable. Section:Detach()/Dock() still work from
+			-- code. Uncomment the Parent line (and the _Input hookup further
+			-- down) to bring the button back.
 			SectionDetach.Name = Compkiller:_RandomString()
-			SectionDetach.Parent = Header
+			-- SectionDetach.Parent = Header
 			SectionDetach.AnchorPoint = Vector2.new(1, 0.5)
 			SectionDetach.BackgroundTransparency = 1.000
 			SectionDetach.BorderSizePixel = 0
@@ -14513,8 +14940,12 @@ function Compkiller.new(Config : Window)
 						BackgroundTransparency = Compkiller.BlockTransparency
 					})
 
+					Compkiller:_Animation(HeaderBar,TweenInfo.new(0.21),{
+						BackgroundTransparency = 0
+					})
+
 					Compkiller:_Animation(SectionText,TweenInfo.new(0.21),{
-						TextTransparency = 0.500
+						TextTransparency = 0.150
 					})
 
 					Compkiller:_Animation(SectionClose,TweenInfo.new(0.21),{
@@ -14522,6 +14953,10 @@ function Compkiller.new(Config : Window)
 					})
 				else
 					Compkiller:_Animation(Section,TweenInfo.new(0.21),{
+						BackgroundTransparency = 1
+					})
+
+					Compkiller:_Animation(HeaderBar,TweenInfo.new(0.21),{
 						BackgroundTransparency = 1
 					})
 
@@ -14573,14 +15008,18 @@ function Compkiller.new(Config : Window)
 			end);
 
 			Header.MouseEnter:Connect(function()
+				if not SectionSignal:GetValue() then return; end;
+
 				Compkiller:_Animation(SectionText,TweenInfo.new(0.2),{
-					TextTransparency = 0.25
+					TextTransparency = 0
 				})
-			end)	
+			end)
 
 			Header.MouseLeave:Connect(function()
+				if not SectionSignal:GetValue() then return; end;
+
 				Compkiller:_Animation(SectionText,TweenInfo.new(0.2),{
-					TextTransparency = 0.500
+					TextTransparency = 0.150
 				})
 			end)
 
@@ -14686,6 +15125,9 @@ function Compkiller.new(Config : Window)
 				task.spawn(RelayoutColumn);
 			end;
 
+			-- Pop-out button wiring, disabled along with the button itself
+			-- (see SectionDetach above).
+			--[[
 			Compkiller:_Hover(SectionDetach, function()
 				if SectionSignal:GetValue() then
 					Compkiller:_Animation(SectionDetach, TweenInfo.new(0.15), { ImageTransparency = 0.1 });
@@ -14703,6 +15145,7 @@ function Compkiller.new(Config : Window)
 					Detach();
 				end;
 			end);
+			]]
 
 			local SectionArgs = Compkiller:_LoadElement(Section , true , SectionSignal);
 
