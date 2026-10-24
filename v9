@@ -19,7 +19,7 @@
 		Section:Detach() / Section:Dock() / Window:DockAll()
 	- Added live ESP preview panel
 		Window:DrawESPPreview({ Tab = VisualsTab, Flags = { Box = "ESPBox", ... } })
-	- Window glow border, drop shadow, gradient title, section accents
+	- Enchanted UI toggle: drop shadow, gradient title, Menu Shine
 --]]
 
 --- Export Types ---
@@ -1983,7 +1983,7 @@ function Compkiller.__CONFIG(config , default)
 end;
 
 -- Enchanted UI: master switch for the cosmetic upgrades -- window/panel
--- glow border, drop shadows, gradient title and Menu Shine. Each piece
+-- drop shadows, gradient title and Menu Shine. Each piece
 -- registers a setter here; SetEnchantedUI flips them all at once.
 Compkiller.EnchantedUI = true;
 Compkiller._EnchantedTargets = {};
@@ -2014,30 +2014,29 @@ end;
 local function StartShineDriver()
 	if Compkiller._ShineDriver then return; end;
 
-	local LastOffset = nil;
+	local LastProgress = nil;
 
 	Compkiller._ShineDriver = RunService.Heartbeat:Connect(function()
 		if not ShineActive() then return; end;
 
-		-- Sweep for SHINE_SWEEP seconds (sine-eased, -1 -> 1), then rest
-		-- off-element until the period wraps.
+		-- Sweep for SHINE_SWEEP seconds (sine-eased progress 0 -> 1), then
+		-- rest off-element until the period wraps. Every element shares the
+		-- same progress, so the band enters and leaves all of them together.
 		local Phase = os.clock() % SHINE_PERIOD;
-		local Offset = -1;
+		local Progress = 0;
 
 		if Phase < SHINE_SWEEP then
-			local Alpha = Phase / SHINE_SWEEP;
-
-			Offset = -1 + 2 * (0.5 - 0.5 * math.cos(Alpha * math.pi));
+			Progress = 0.5 - 0.5 * math.cos((Phase / SHINE_SWEEP) * math.pi);
 		end;
 
-		if Offset == LastOffset then return; end;
+		if Progress == LastProgress then return; end;
 
-		LastOffset = Offset;
+		LastProgress = Progress;
 
-		local Vector = Vector2.new(Offset, 0);
-
-		for Gradient in next, Compkiller._ShineGradients do
-			Gradient.Offset = Vector;
+		-- Band center sits at 0.5 + Offset; travel from fully off the left
+		-- edge (-Half) to fully off the right edge (1 + Half).
+		for Gradient, Half in next, Compkiller._ShineGradients do
+			Gradient.Offset = Vector2.new(-0.5 - Half + Progress * (1 + 2 * Half), 0);
 		end;
 	end);
 end;
@@ -2062,18 +2061,32 @@ function Compkiller:_AddShine(Target: GuiObject, Condition: (() -> boolean)?) : 
 		ShineCorner.Parent = Shine;
 	end;
 
-	Gradient.Rotation = 20
-	Gradient.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 1),
-		NumberSequenceKeypoint.new(0.38, 1),
-		NumberSequenceKeypoint.new(0.5, 0.5),
-		NumberSequenceKeypoint.new(0.62, 1),
-		NumberSequenceKeypoint.new(1, 1),
-	})
+	-- Unrotated band with a fixed ~12px half-width on every element, so a
+	-- wide button and a small toggle pill show the same-looking shine.
+	-- Rebuilt when the element resizes (slider fill grows/shrinks).
+	local function BuildBand()
+		local Half = math.clamp(12 / math.max(Target.AbsoluteSize.X, 1), 0.04, 0.45);
+
+		Gradient.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1),
+			NumberSequenceKeypoint.new(0.5 - Half, 1),
+			NumberSequenceKeypoint.new(0.5, 0.5),
+			NumberSequenceKeypoint.new(0.5 + Half, 1),
+			NumberSequenceKeypoint.new(1, 1),
+		});
+
+		if Compkiller._ShineGradients[Gradient] ~= nil or Gradient.Parent then
+			Compkiller._ShineGradients[Gradient] = Half;
+		end;
+	end;
+
+	Gradient.Rotation = 0
 	Gradient.Offset = Vector2.new(-1, 0)
 	Gradient.Parent = Shine
 
-	Compkiller._ShineGradients[Gradient] = true;
+	BuildBand();
+
+	Target:GetPropertyChangedSignal("AbsoluteSize"):Connect(BuildBand);
 
 	Shine.Destroying:Connect(function()
 		Compkiller._ShineGradients[Gradient] = nil;
@@ -2137,43 +2150,6 @@ function Compkiller:_BindAccentGradient(Gradient: UIGradient, Build: (Color3) ->
 		Element = Proxy,
 		Property = "Value"
 	});
-end;
-
--- Slow rotating accent glow for a window/panel border: a UIStroke whose
--- UIGradient spins forever (engine tween, no Lua per frame). Returns the
--- stroke so callers can fade its Transparency with their own open/close.
-function Compkiller:_AddGlowStroke(Target: GuiObject, Thickness: number?) : UIStroke
-	local Stroke = Instance.new("UIStroke");
-	local Gradient = Instance.new("UIGradient");
-
-	Stroke.Thickness = Thickness or 1.2;
-	Stroke.Color = Color3.fromRGB(255, 255, 255);
-	Stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border;
-	Stroke.Parent = Target;
-
-	Compkiller:_BindAccentGradient(Gradient, function(Accent)
-		local Dim = Compkiller.Colors.HighStrokeColor;
-
-		return ColorSequence.new({
-			ColorSequenceKeypoint.new(0, Accent),
-			ColorSequenceKeypoint.new(0.3, Dim),
-			ColorSequenceKeypoint.new(0.5, Accent),
-			ColorSequenceKeypoint.new(0.8, Dim),
-			ColorSequenceKeypoint.new(1, Accent),
-		});
-	end);
-
-	Gradient.Parent = Stroke;
-
-	TweenService:Create(Gradient, TweenInfo.new(6, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1), {
-		Rotation = 360
-	}):Play();
-
-	Compkiller:_AddEnchanted(function(On)
-		Stroke.Enabled = On;
-	end);
-
-	return Stroke;
 end;
 
 -- Soft 9-slice drop shadow behind a window/panel. ZIndex 0 + created before
@@ -2243,7 +2219,13 @@ function Compkiller:_CreateFloatingPanel(Parent: Instance, Config)
 
 	Compkiller:_AddShadow(Root);
 
-	local Stroke = Compkiller:_AddGlowStroke(Root, 1);
+	-- Plain, theme-colored hairline border (no accent glow).
+	local Stroke = Instance.new("UIStroke");
+
+	Stroke.Color = Compkiller.Colors.HighStrokeColor;
+	Stroke.Parent = Root;
+
+	table.insert(Compkiller.Elements.HighStrokeColor, { Element = Stroke, Property = "Color" });
 
 	Header.Name = Compkiller:_RandomString()
 	Header.Parent = Root
@@ -8392,13 +8374,9 @@ function Compkiller.new(Config : Window)
 	-- they hide with it when the menu closes (MainFrame.Visible flips off).
 	do
 		local Shadow = Compkiller:_AddShadow(MainFrame, 46);
-		local Glow = Compkiller:_AddGlowStroke(MainFrame, 1.4);
-
-		WindowArgs._GlowStroke = Glow;
 
 		-- Fade with the window instead of popping off at the Visible cutoff.
 		WindowOpen:Connect(function(v)
-			Compkiller:_Animation(Glow, TweenInfo.new(0.2), { Transparency = (v and 0) or 1 });
 			Compkiller:_Animation(Shadow, TweenInfo.new(0.2), { ImageTransparency = (v and 0.45) or 1 });
 		end);
 	end;
@@ -12527,7 +12505,7 @@ function Compkiller.new(Config : Window)
 			end,
 		});
 
-		-- Enchanted UI: the cosmetic upgrades (glow border, drop shadows,
+		-- Enchanted UI: the cosmetic upgrades (drop shadows,
 		-- gradient title, Menu Shine). Defaults on via Compkiller.EnchantedUI /
 		-- Compkiller.MenuShine, so like the other toggles here the callbacks
 		-- only need to run on change. Menu Shine lives in its gear.
@@ -12541,7 +12519,7 @@ function Compkiller.new(Config : Window)
 		});
 
 		EnchantedToggle.Link:AddHelper({
-			Text = "Glow border, drop shadows, gradient title and Menu Shine. Open the gear for individual options.",
+			Text = "Drop shadows, gradient title and Menu Shine. Open the gear for individual options.",
 		});
 
 		local EnchantedOption = EnchantedToggle.Link:AddOption();
@@ -13256,12 +13234,53 @@ function Compkiller.new(Config : Window)
 			Center = BoundsCFrame.Position;
 			Extents = BoundsSize;
 
+			-- Box hugs the actual body only. Game-specific extras (swords,
+			-- tails, capes welded on as plain parts, not Accessories) would
+			-- otherwise stretch it far past the character.
 			BoxParts = {};
 
-			for _, Object in ipairs(Model:GetDescendants()) do
-				if Object:IsA("BasePart") and Object.Name ~= "HumanoidRootPart" and not Object:FindFirstAncestorWhichIsA("Accessory") then
-					table.insert(BoxParts, Object);
+			local BODY_PARTS = {
+				"Head", "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg",
+				"UpperTorso", "LowerTorso",
+				"LeftUpperArm", "LeftLowerArm", "LeftHand", "RightUpperArm", "RightLowerArm", "RightHand",
+				"LeftUpperLeg", "LeftLowerLeg", "LeftFoot", "RightUpperLeg", "RightLowerLeg", "RightFoot",
+			};
+
+			for _, Name in ipairs(BODY_PARTS) do
+				local Part = Model:FindFirstChild(Name);
+
+				if Part and Part:IsA("BasePart") then
+					table.insert(BoxParts, Part);
 				end;
+			end;
+
+			if #BoxParts == 0 then
+				for _, Object in ipairs(Model:GetDescendants()) do
+					if Object:IsA("BasePart") and Object.Name ~= "HumanoidRootPart" and not Object:FindFirstAncestorWhichIsA("Accessory") then
+						table.insert(BoxParts, Object);
+					end;
+				end;
+			end;
+
+			-- Center/frame on the body too, so extras don't shift the spin
+			-- axis off the character or shrink it in the camera.
+			if #BoxParts > 0 then
+				local Min = Vector3.new(math.huge, math.huge, math.huge);
+				local Max = -Min;
+
+				for _, Part in ipairs(BoxParts) do
+					local Half = Part.Size / 2;
+
+					for _, CornerSign in ipairs(CORNERS) do
+						local Point = Part.CFrame:PointToWorldSpace(Half * CornerSign);
+
+						Min = Min:Min(Point);
+						Max = Max:Max(Point);
+					end;
+				end;
+
+				Center = (Min + Max) / 2;
+				Extents = Max - Min;
 			end;
 
 			-- Soft contact shadow under the feet (not part of Model, so it
@@ -13409,7 +13428,7 @@ function Compkiller.new(Config : Window)
 			NameText.Visible = IsOn("Name");
 			NameText.Text = LocalPlayer.DisplayName;
 			NameText.TextColor3 = ColorOf("Name");
-			NameText.Position = UDim2.fromOffset(CenterX - 100, MinY - 3);
+			NameText.Position = UDim2.fromOffset(CenterX, MinY - 3);
 
 			local BelowY = MaxY + 3;
 
@@ -13418,7 +13437,7 @@ function Compkiller.new(Config : Window)
 			if DistanceText.Visible then
 				DistanceText.Text = "[" .. tostring(math.floor(24 + 6 * math.sin(os.clock() * 0.5))) .. "m]";
 				DistanceText.TextColor3 = ColorOf("Distance");
-				DistanceText.Position = UDim2.fromOffset(CenterX - 100, BelowY);
+				DistanceText.Position = UDim2.fromOffset(CenterX, BelowY);
 
 				BelowY += 12;
 			end;
@@ -13426,7 +13445,7 @@ function Compkiller.new(Config : Window)
 			ToolText.Visible = IsOn("Tool");
 			ToolText.Text = ToolName;
 			ToolText.TextColor3 = ColorOf("Tool");
-			ToolText.Position = UDim2.fromOffset(CenterX - 100, BelowY);
+			ToolText.Position = UDim2.fromOffset(CenterX, BelowY);
 
 			-- Tracer: bottom-center of the stage to the box's bottom edge.
 			if IsOn("Tracer") then
